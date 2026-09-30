@@ -64,37 +64,47 @@ export function buildAliases(product, manualAliases = []) {
   return [...set].filter(Boolean);
 }
 
+function strongestAlias(product, aliases) {
+  const all = buildAliases(product, aliases);
+  // Preferisce una variante senza il sostantivo generico iniziale:
+  // "Golden Melinda" invece di "Mela Golden Melinda".
+  const shorter = all
+    .filter(x => normalizeText(x).split(" ").length >= 2)
+    .sort((a, b) => a.length - b.length);
+  return shorter[0] || product;
+}
+
 export function buildQueries(product, aliases = [], retailerDomains = [], maxResults = 20, gdoExtended = true) {
   const seeds = buildAliases(product, aliases);
+  const retailAlias = strongestAlias(product, aliases);
   const q = [];
 
-  // Query commerciali generiche
   q.push(`"${product}" prezzo`);
   q.push(`"${product}" "al kg"`);
   q.push(`"${product}" offerta supermercato`);
   q.push(`"${product}" "spesa online"`);
   q.push(`"${product}" acquista`);
   q.push(`"${product}" confezione kg`);
-  q.push(`"${product}" volantino`);
-  q.push(`"${product}" e-commerce`);
+  q.push(`"${retailAlias}" prezzo`);
+  q.push(`"${retailAlias}" supermercato`);
+  q.push(`"${retailAlias}" offerta`);
+  q.push(`"${retailAlias}" "spesa online"`);
 
   if (seeds[1]) q.push(`"${seeds[1]}" prezzo kg`);
-  if (seeds[2]) q.push(`"${seeds[2]}" supermercato`);
 
-  // Domini forniti dall'utente: massima priorità.
   for (const domain of retailerDomains.filter(Boolean).slice(0, 10)) {
-    q.push(`site:${domain} "${product}"`);
+    q.push(`site:${domain} "${retailAlias}"`);
   }
 
-  // Ricerca GDO estesa: una query per retailer.
   if (gdoExtended) {
     const chosen = KNOWN_RETAILERS.filter(d => !retailerDomains.includes(d));
     for (const domain of chosen) {
-      q.push(`site:${domain} "${product}"`);
+      // Non usare la frase troppo restrittiva "Mela Golden Melinda":
+      // molti retailer indicizzano "Mele Golden Melinda", "Golden Melinda", ecc.
+      q.push(`site:${domain} "${retailAlias}"`);
     }
   }
 
-  // Con GDO estesa arriviamo fino a ~25 query, accettabile con Serper.
-  const maxQueries = gdoExtended ? 26 : (maxResults <= 10 ? 8 : maxResults <= 25 ? 12 : 16);
+  const maxQueries = gdoExtended ? 28 : (maxResults <= 10 ? 8 : maxResults <= 25 ? 12 : 16);
   return [...new Set(q)].slice(0, maxQueries);
 }

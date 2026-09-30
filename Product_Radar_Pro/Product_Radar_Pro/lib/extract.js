@@ -10,14 +10,8 @@ function toNumber(v) {
   if (v === null || v === undefined) return null;
   let s = String(v).trim().replace(/[^\d,.\-]/g, "");
   if (!s) return null;
-
-  if (s.includes(",") && s.includes(".")) {
-    // 1.234,56
-    s = s.replace(/\./g, "").replace(",", ".");
-  } else if (s.includes(",")) {
-    s = s.replace(",", ".");
-  }
-
+  if (s.includes(",") && s.includes(".")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (s.includes(",")) s = s.replace(",", ".");
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -25,7 +19,6 @@ function toNumber(v) {
 function plausiblePrice(n) {
   return n !== null && n >= 0.20 && n <= 500;
 }
-
 function plausibleProduceKgPrice(n) {
   return n !== null && n >= 0.20 && n <= 50;
 }
@@ -33,7 +26,7 @@ function plausibleProduceKgPrice(n) {
 function parseCaliber(text) {
   const patterns = [
     /\bcal(?:ibro)?\.?\s*[:\-]?\s*(\d{2,3})\s*[\/\-]\s*(\d{2,3})\b/i,
-    /\bcal\.?\s*(\d{2,3})\s*[\/\-]\s*(\d{2,3})\b/i
+    /\b(\d{2,3})\s*[\/\-]\s*(\d{2,3})\b(?=\s*(?:mm|calibro|cal\.?)?)/i
   ];
   for (const p of patterns) {
     const m = text.match(p);
@@ -44,14 +37,13 @@ function parseCaliber(text) {
 
 function weightCandidates(text) {
   const out = [];
-  const rx = /(\d+(?:[.,]\d+)?)\s*(kg|g|gr|grammi)\b/gi;
+
+  // 1 kg, 900 g, 4,3 kg
+  const rx1 = /(\d+(?:[.,]\d+)?)\s*(kg|g|gr|grammi)\b/gi;
   let m;
-
-  while ((m = rx.exec(text)) !== null) {
-    const start = Math.max(0, m.index - 24);
+  while ((m = rx1.exec(text)) !== null) {
+    const start = Math.max(0, m.index - 25);
     const before = text.slice(start, m.index).toLowerCase();
-
-    // Non trattare calibro/pezzatura come peso.
     if (/(calibro|cal\.?|pezzatura)\s*[\d\s\/\-]*$/i.test(before)) continue;
 
     const value = toNumber(m[1]);
@@ -59,17 +51,25 @@ function weightCandidates(text) {
 
     const unit = m[2].toLowerCase();
     const kg = unit === "kg" ? value : value / 1000;
-
-    // Evita errori tipo "75-80 kg" generati dal calibro.
-    // Mantiene comunque cassette/pacchi realistici.
     if (kg <= 0 || kg > 25) continue;
 
-    out.push({
-      raw: `${m[1]} ${m[2]}`,
-      kg,
-      index: m.index
-    });
+    out.push({ raw: `${m[1]} ${m[2]}`, kg, index: m.index });
   }
+
+  // kg 1 / kg.1 / kg. 1 / kg 1,50
+  const rx2 = /\bkg\s*[\.:]?\s*(\d+(?:[.,]\d+)?)\b/gi;
+  while ((m = rx2.exec(text)) !== null) {
+    const value = toNumber(m[1]);
+    if (value === null || value <= 0 || value > 25) continue;
+
+    // Evita "€ 2,44 al kg 1" se appare come costrutto di prezzo.
+    const before = text.slice(Math.max(0, m.index - 20), m.index).toLowerCase();
+    if (/(€|eur|al\s+|per\s+)$/i.test(before)) continue;
+
+    out.push({ raw: `${m[1]} kg`, kg: value, index: m.index });
+  }
+
+  out.sort((a, b) => a.index - b.index);
   return out;
 }
 
@@ -95,7 +95,6 @@ function parseGenericPrices(text) {
     /€\s*(\d{1,3}(?:[.,]\d{1,2}))/gi,
     /(\d{1,3}(?:[.,]\d{1,2}))\s*€/gi
   ];
-
   for (const p of patterns) {
     let m;
     while ((m = p.exec(text)) !== null) {
@@ -103,7 +102,6 @@ function parseGenericPrices(text) {
       if (plausiblePrice(n)) out.push({ value: n, index: m.index });
     }
   }
-
   out.sort((a, b) => a.index - b.index);
   return out;
 }
@@ -117,8 +115,7 @@ function parseDate(text) {
     "(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)";
   const patterns = [
     new RegExp(`\\b(\\d{1,2}\\s+${month}\\s+\\d{4})\\b`, "i"),
-    /\b(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})\b/,
-    /\b(20\d{2})\b/
+    /\b(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})\b/
   ];
   for (const p of patterns) {
     const m = text.match(p);
@@ -150,7 +147,6 @@ export function extractCommercialFields(text = "") {
   const priceKgExplicit = parseUnitPrice(clean);
   const prices = parseGenericPrices(clean);
 
-  // Se il prezzo appare nello stesso contesto di /kg, non usarlo anche come prezzo confezione.
   let packPrice = null;
   if (prices.length) {
     for (const p of prices) {
@@ -178,7 +174,6 @@ export function extractCommercialFields(text = "") {
     }
   }
 
-  // Se c'è solo un prezzo e nessun formato, non fingere che sia €/kg.
   return {
     packPrice,
     priceKg,
@@ -232,11 +227,9 @@ function aliasScore(text, aliases) {
 function pickProductNode(nodes, aliases) {
   let best = null;
   let bestScore = -1;
-
   for (const n of nodes) {
     const type = Array.isArray(n["@type"]) ? n["@type"].join(" ") : String(n["@type"] || "");
     if (!/product/i.test(type)) continue;
-
     const text = `${n.name || ""} ${n.description || ""} ${n.sku || ""}`;
     const score = aliasScore(text, aliases);
     if (score > bestScore) {
@@ -244,7 +237,6 @@ function pickProductNode(nodes, aliases) {
       bestScore = score;
     }
   }
-
   return best;
 }
 
@@ -253,7 +245,6 @@ function offerFromProduct(node) {
   let offers = node.offers;
   if (!offers) return {};
   if (Array.isArray(offers)) offers = offers[0] || {};
-
   const price =
     toNumber(offers.price) ??
     toNumber(offers.lowPrice) ??
@@ -275,10 +266,8 @@ function structuredWeight(node) {
   if (typeof node.weight === "string") {
     return weightCandidates(node.weight)[0] || null;
   }
-
   const value = toNumber(node.weight.value);
   const unit = String(node.weight.unitCode || node.weight.unitText || "").toLowerCase();
-
   if (value === null) return null;
   if (/kg|kilogram/.test(unit) && value <= 25) return { raw: `${value} kg`, kg: value };
   if (/g|gram/.test(unit) && value <= 25000) return { raw: `${value} g`, kg: value / 1000 };
@@ -298,6 +287,11 @@ function hostName(url) {
   }
 }
 
+function blockedPage(title = "", body = "") {
+  const text = `${title} ${body.slice(0, 1200)}`.toLowerCase();
+  return /\b(access denied|forbidden|captcha|verify you are human|cloudflare|temporarily blocked|403 forbidden)\b/i.test(text);
+}
+
 async function fetchStatic(url) {
   const r = await fetch(url, {
     headers: {
@@ -310,7 +304,6 @@ async function fetchStatic(url) {
 
   const ct = r.headers.get("content-type") || "";
   if (!r.ok || !ct.includes("text/html")) return null;
-
   return { html: await r.text(), finalUrl: r.url };
 }
 
@@ -327,11 +320,7 @@ async function getBrowser() {
 
 async function fetchRendered(url) {
   const browser = await getBrowser();
-  const context = await browser.newContext({
-    userAgent: UA,
-    locale: "it-IT"
-  });
-
+  const context = await browser.newContext({ userAgent: UA, locale: "it-IT" });
   const page = await context.newPage();
 
   try {
@@ -355,8 +344,18 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     original.title ||
     "";
 
+  if (blockedPage(title, bodyText)) {
+    return {
+      blocked: true,
+      title: original.title || title,
+      url: finalUrl || original.url,
+      domain: hostName(finalUrl || original.url),
+      provider: original.provider || "",
+      verification: "Accesso bloccato - uso snippet Google"
+    };
+  }
+
   const allText = `${title} ${original.snippet || ""} ${bodyText}`;
-  const normalized = normalizeText(allText);
 
   for (const ex of exclusions) {
     const e = normalizeText(ex);
@@ -398,7 +397,6 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     null;
 
   const sku = productNode?.sku || productNode?.gtin13 || productNode?.gtin || null;
-  const currentYear = new Date().getFullYear();
 
   const dateHint =
     offer.priceValidUntil ||
@@ -408,18 +406,13 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     textFields.detectedDate ||
     null;
 
-  const yearMatch = String(dateHint || "").match(/20\d{2}/);
-  const historical = yearMatch ? Number(yearMatch[0]) < currentYear : /archiv/i.test(title);
-
   let confidence = "Media";
   if (productNode && packPrice !== null) confidence = "Alta";
   else if (priceKg !== null && aliasScore(`${productName} ${bodyText.slice(0,3000)}`, aliases) >= 2) confidence = "Alta";
   else if (packPrice === null && priceKg === null) confidence = "Bassa";
 
-  const evidenceBase = bodyText || original.snippet || "";
-  const evidence = evidenceBase.slice(0, 800);
-
   return {
+    blocked: false,
     queryTitle: original.title || "",
     title: productName || title,
     url: finalUrl || original.url,
@@ -440,10 +433,9 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     sku,
     detectedDate: dateHint,
     origin: textFields.origin,
-    historical,
     verification: rendered ? "Pagina verificata (browser)" : "Pagina verificata",
     confidence,
-    evidence,
+    evidence: bodyText.slice(0, 800),
     usedBrowser: rendered
   };
 }
@@ -464,8 +456,10 @@ export async function analyzeResult(original, aliases, exclusions, allowBrowser 
       false
     );
 
-    // Se la pagina statica ci dà già un prezzo affidabile, non aprire Chromium.
-    if (
+    if (parsed?.blocked) {
+      // Prova il browser solo se richiesto, altrimenti torna "blocked".
+      if (!allowBrowser) return parsed;
+    } else if (
       parsed &&
       (
         parsed.confidence === "Alta" ||

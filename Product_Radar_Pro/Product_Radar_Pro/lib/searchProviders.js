@@ -48,7 +48,8 @@ export async function testSerper(query = "Mela Golden Melinda") {
     first: (data.organic || []).slice(0, 3).map(x => ({
       title: x.title,
       link: x.link,
-      snippet: x.snippet
+      snippet: x.snippet,
+      date: x.date || null
     }))
   };
 }
@@ -78,6 +79,8 @@ export async function searchSerper(query, count = 10) {
       title: x.title || "",
       url: x.link || "",
       snippet: x.snippet || "",
+      searchDate: x.date || null,
+      position: x.position ?? null,
       provider: "Google/Serper"
     }));
   } catch (e) {
@@ -104,7 +107,7 @@ export async function searchDuckDuckGo(query, count = 10) {
       const title = a.text().trim();
       const href = cleanUrl(a.attr("href") || "");
       const snippet = $(el).find(".result__snippet").text().trim();
-      if (title && href) out.push({ title, url: href, snippet, provider: "DuckDuckGo" });
+      if (title && href) out.push({ title, url: href, snippet, searchDate: null, provider: "DuckDuckGo" });
     });
     return out;
   } catch {
@@ -129,7 +132,7 @@ export async function searchBing(query, count = 10) {
       const title = a.text().trim();
       const href = a.attr("href") || "";
       const snippet = $(el).find(".b_caption p").first().text().trim();
-      if (title && href) out.push({ title, url: href, snippet, provider: "Bing" });
+      if (title && href) out.push({ title, url: href, snippet, searchDate: null, provider: "Bing" });
     });
     return out;
   } catch {
@@ -140,7 +143,6 @@ export async function searchBing(query, count = 10) {
 export async function multiSearch(query, count = 10) {
   let results = [];
 
-  // Se Serper è configurato, usa Google/Serper come sorgente principale.
   if (process.env.SERPER_API_KEY) {
     results = await searchSerper(query, count);
   } else {

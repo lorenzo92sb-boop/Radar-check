@@ -6,6 +6,13 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154 Safari/537.36";
 
+const GENERIC = new Set([
+  "mela","mele","pera","pere","kiwi","uva","frutta","ortofrutta",
+  "pomodoro","pomodori","patata","patate","cipolla","cipolle",
+  "finocchio","finocchi","arancia","arance","limone","limoni",
+  "delicious"
+]);
+
 function toNumber(v) {
   if (v === null || v === undefined) return null;
   let s = String(v).trim().replace(/[^\d,.\-]/g, "");
@@ -19,6 +26,7 @@ function toNumber(v) {
 function plausiblePrice(n) {
   return n !== null && n >= 0.20 && n <= 500;
 }
+
 function plausibleProduceKgPrice(n) {
   return n !== null && n >= 0.20 && n <= 50;
 }
@@ -38,12 +46,13 @@ function parseCaliber(text) {
 function weightCandidates(text) {
   const out = [];
 
-  // 1 kg, 900 g, 4,3 kg
+  // Formati standard: 1 kg, 900 g, 4,3 kg
   const rx1 = /(\d+(?:[.,]\d+)?)\s*(kg|g|gr|grammi)\b/gi;
   let m;
   while ((m = rx1.exec(text)) !== null) {
-    const start = Math.max(0, m.index - 25);
+    const start = Math.max(0, m.index - 28);
     const before = text.slice(start, m.index).toLowerCase();
+
     if (/(calibro|cal\.?|pezzatura)\s*[\d\s\/\-]*$/i.test(before)) continue;
 
     const value = toNumber(m[1]);
@@ -56,14 +65,14 @@ function weightCandidates(text) {
     out.push({ raw: `${m[1]} ${m[2]}`, kg, index: m.index });
   }
 
-  // kg 1 / kg.1 / kg. 1 / kg 1,50
-  const rx2 = /\bkg\s*[\.:]?\s*(\d+(?:[.,]\d+)?)\b/gi;
+  // Formati italiani del tipo "kg.1" o "kg 1 circa".
+  // NON accetta decimali: "kg 1,50" nei listini GDO è spesso il PREZZO al kg.
+  const rx2 = /\bkg\s*[\.:]?\s*(\d{1,2})\b(?![.,]\d)/gi;
   while ((m = rx2.exec(text)) !== null) {
     const value = toNumber(m[1]);
     if (value === null || value <= 0 || value > 25) continue;
 
-    // Evita "€ 2,44 al kg 1" se appare come costrutto di prezzo.
-    const before = text.slice(Math.max(0, m.index - 20), m.index).toLowerCase();
+    const before = text.slice(Math.max(0, m.index - 22), m.index).toLowerCase();
     if (/(€|eur|al\s+|per\s+)$/i.test(before)) continue;
 
     out.push({ raw: `${m[1]} kg`, kg: value, index: m.index });
@@ -77,8 +86,11 @@ function parseUnitPrice(text) {
   const patterns = [
     /(?:€\s*)?(\d{1,3}(?:[.,]\d{1,2}))\s*€?\s*(?:\/|al|per)\s*kg\b/i,
     /(?:€\s*)?(\d{1,3}(?:[.,]\d{1,2}))\s*(?:€\/kg|eur\/kg)\b/i,
-    /\b(?:al\s+kg|kg)\s*[:\-]?\s*€?\s*(\d{1,3}(?:[.,]\d{1,2}))\b/i
+    /\b(?:al\s+kg|kg)\s*[:\-]?\s*€?\s*(\d{1,3}(?:[.,]\d{1,2}))\b/i,
+    // Nei listini italiani "MELE ... kg 1,50" è spesso € 1,50/kg.
+    /\bkg\s+(\d{1,2}[.,]\d{2})\b/i
   ];
+
   for (const p of patterns) {
     const m = text.match(p);
     if (m) {
@@ -95,6 +107,7 @@ function parseGenericPrices(text) {
     /€\s*(\d{1,3}(?:[.,]\d{1,2}))/gi,
     /(\d{1,3}(?:[.,]\d{1,2}))\s*€/gi
   ];
+
   for (const p of patterns) {
     let m;
     while ((m = p.exec(text)) !== null) {
@@ -102,6 +115,7 @@ function parseGenericPrices(text) {
       if (plausiblePrice(n)) out.push({ value: n, index: m.index });
     }
   }
+
   out.sort((a, b) => a.index - b.index);
   return out;
 }
@@ -213,25 +227,47 @@ function parseJsonLd($) {
   return nodes;
 }
 
-function aliasScore(text, aliases) {
-  const hay = normalizeText(text);
-  let score = 0;
-  for (const a of aliases) {
-    for (const tok of normalizeText(a).split(" ").filter(x => x.length >= 3)) {
-      if (hay.includes(tok)) score++;
+function specificTokensFromAliases(aliases) {
+  const counts = new Map();
+
+  for (const alias of aliases) {
+    for (const tok of normalizeText(alias).split(" ")) {
+      if (tok.length < 3 || GENERIC.has(tok)) continue;
+      counts.set(tok, (counts.get(tok) || 0) + 1);
     }
   }
-  return score;
+
+  // I token ricorrenti tra le varianti sono i più affidabili:
+  // es. Golden + Melinda.
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([tok]) => tok)
+    .slice(0, 3);
+}
+
+function identityMatch(text, aliases) {
+  const hay = normalizeText(text);
+  const required = specificTokensFromAliases(aliases);
+  if (!required.length) return true;
+
+  // Per Golden Melinda richiede entrambi i token.
+  return required.slice(0, Math.min(2, required.length)).every(tok => hay.includes(tok));
 }
 
 function pickProductNode(nodes, aliases) {
   let best = null;
   let bestScore = -1;
+
   for (const n of nodes) {
     const type = Array.isArray(n["@type"]) ? n["@type"].join(" ") : String(n["@type"] || "");
     if (!/product/i.test(type)) continue;
+
     const text = `${n.name || ""} ${n.description || ""} ${n.sku || ""}`;
-    const score = aliasScore(text, aliases);
+    if (!identityMatch(n.name || text, aliases)) continue;
+
+    const score = specificTokensFromAliases(aliases)
+      .filter(tok => normalizeText(text).includes(tok)).length;
+
     if (score > bestScore) {
       best = n;
       bestScore = score;
@@ -245,6 +281,7 @@ function offerFromProduct(node) {
   let offers = node.offers;
   if (!offers) return {};
   if (Array.isArray(offers)) offers = offers[0] || {};
+
   const price =
     toNumber(offers.price) ??
     toNumber(offers.lowPrice) ??
@@ -263,12 +300,12 @@ function offerFromProduct(node) {
 
 function structuredWeight(node) {
   if (!node?.weight) return null;
-  if (typeof node.weight === "string") {
-    return weightCandidates(node.weight)[0] || null;
-  }
+  if (typeof node.weight === "string") return weightCandidates(node.weight)[0] || null;
+
   const value = toNumber(node.weight.value);
   const unit = String(node.weight.unitCode || node.weight.unitText || "").toLowerCase();
   if (value === null) return null;
+
   if (/kg|kilogram/.test(unit) && value <= 25) return { raw: `${value} kg`, kg: value };
   if (/g|gram/.test(unit) && value <= 25000) return { raw: `${value} g`, kg: value / 1000 };
   return null;
@@ -338,36 +375,68 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
   const $ = cheerio.load(html);
   const bodyText = textFromPage($);
 
-  const title =
+  const pageTitle =
     $('meta[property="og:title"]').attr("content") ||
     $("title").text().trim() ||
     original.title ||
     "";
 
-  if (blockedPage(title, bodyText)) {
+  if (blockedPage(pageTitle, bodyText)) {
     return {
       blocked: true,
-      title: original.title || title,
+      title: original.title || pageTitle,
       url: finalUrl || original.url,
       domain: hostName(finalUrl || original.url),
       provider: original.provider || "",
-      verification: "Accesso bloccato - uso snippet Google"
+      verification: "Accesso pagina bloccato - dati da Google"
     };
   }
 
-  const allText = `${title} ${original.snippet || ""} ${bodyText}`;
-
   for (const ex of exclusions) {
     const e = normalizeText(ex);
-    if (e && normalizeText(`${title} ${original.snippet || ""}`).includes(e)) {
-      return null;
-    }
+    if (e && normalizeText(`${pageTitle} ${original.snippet || ""}`).includes(e)) return null;
   }
 
   const nodes = parseJsonLd($);
   const productNode = pickProductNode(nodes, aliases);
+
+  // GATE DI IDENTITÀ:
+  // su pagine categoria (come Decò) il parser non può prendere il primo prodotto casuale.
+  const nodeName = productNode?.name || "";
+  const titleMatches = identityMatch(pageTitle, aliases);
+  const nodeMatches = productNode ? identityMatch(nodeName, aliases) : false;
+
+  if (!titleMatches && !nodeMatches) {
+    return {
+      identityMismatch: true,
+      title: original.title || pageTitle,
+      url: finalUrl || original.url,
+      domain: hostName(finalUrl || original.url),
+      provider: original.provider || "",
+      verification: "Pagina generica - dati Google mantenuti"
+    };
+  }
+
+  // Se abbiamo un Product JSON-LD coerente, usiamo il suo contesto.
+  // Altrimenti usiamo la pagina solo se il titolo è davvero del prodotto.
   const offer = offerFromProduct(productNode);
-  const textFields = extractCommercialFields(allText);
+
+  let contextText = `${pageTitle} ${original.snippet || ""}`;
+  if (productNode) {
+    contextText += ` ${productNode.name || ""} ${productNode.description || ""}`;
+  } else if (titleMatches) {
+    // Limitiamo il testo della pagina per evitare prezzi di prodotti lontani.
+    const required = specificTokensFromAliases(aliases);
+    const normBody = normalizeText(bodyText);
+    let pos = 0;
+    for (const tok of required) {
+      const p = normBody.indexOf(tok);
+      if (p >= 0) { pos = p; break; }
+    }
+    contextText += ` ${bodyText.slice(Math.max(0, pos - 400), pos + 2500)}`;
+  }
+
+  const textFields = extractCommercialFields(contextText);
   const structuredW = structuredWeight(productNode);
 
   let packPrice = offer.price ?? textFields.packPrice;
@@ -390,7 +459,7 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     }
   }
 
-  const productName = productNode?.name || title;
+  const productName = productNode?.name || pageTitle;
   const brand =
     productNode?.brand?.name ||
     (typeof productNode?.brand === "string" ? productNode.brand : null) ||
@@ -407,14 +476,15 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     null;
 
   let confidence = "Media";
-  if (productNode && packPrice !== null) confidence = "Alta";
-  else if (priceKg !== null && aliasScore(`${productName} ${bodyText.slice(0,3000)}`, aliases) >= 2) confidence = "Alta";
+  if (productNode && offer.price !== null && nodeMatches) confidence = "Alta";
+  else if ((packPrice !== null || priceKg !== null) && titleMatches) confidence = "Alta";
   else if (packPrice === null && priceKg === null) confidence = "Bassa";
 
   return {
     blocked: false,
+    identityMismatch: false,
     queryTitle: original.title || "",
-    title: productName || title,
+    title: productName || original.title || pageTitle,
     url: finalUrl || original.url,
     domain: hostName(finalUrl || original.url),
     provider: original.provider || "",
@@ -435,7 +505,7 @@ function parseHtml(html, finalUrl, original, aliases, exclusions, rendered = fal
     origin: textFields.origin,
     verification: rendered ? "Pagina verificata (browser)" : "Pagina verificata",
     confidence,
-    evidence: bodyText.slice(0, 800),
+    evidence: contextText.slice(0, 1000),
     usedBrowser: rendered
   };
 }
@@ -456,10 +526,10 @@ export async function analyzeResult(original, aliases, exclusions, allowBrowser 
       false
     );
 
-    if (parsed?.blocked) {
-      // Prova il browser solo se richiesto, altrimenti torna "blocked".
-      if (!allowBrowser) return parsed;
-    } else if (
+    // Se la pagina è generica o bloccata, NON sostituiamo i dati Google.
+    if (parsed?.identityMismatch || parsed?.blocked) return parsed;
+
+    if (
       parsed &&
       (
         parsed.confidence === "Alta" ||

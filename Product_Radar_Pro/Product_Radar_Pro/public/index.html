@@ -3,40 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Product Radar Pro</title>
+  <title>Product Radar Pro v2</title>
   <style>
     :root { font-family: Inter, Segoe UI, Arial, sans-serif; color:#1d232a; background:#f4f6f8; }
     * { box-sizing:border-box; }
     body { margin:0; }
-    header { background:white; border-bottom:1px solid #ddd; padding:18px 24px; position:sticky; top:0; z-index:10; }
+    header { background:white; border-bottom:1px solid #ddd; padding:18px 24px; }
     h1 { margin:0; font-size:24px; }
     header p { margin:5px 0 0; color:#64707d; }
     main { max-width:1500px; margin:22px auto; padding:0 18px 40px; }
-    .card { background:white; border:1px solid #e0e4e8; border-radius:14px; padding:18px; margin-bottom:18px; box-shadow:0 2px 10px rgba(0,0,0,.03); }
+    .card { background:white; border:1px solid #e0e4e8; border-radius:14px; padding:18px; margin-bottom:18px; }
     .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
     .wide { grid-column:span 2; }
     label { font-weight:600; display:block; margin-bottom:6px; }
-    input, textarea, select { width:100%; padding:10px 11px; border:1px solid #cbd2d9; border-radius:8px; font:inherit; }
+    input, textarea { width:100%; padding:10px 11px; border:1px solid #cbd2d9; border-radius:8px; font:inherit; }
     textarea { min-height:92px; resize:vertical; }
     button { border:0; border-radius:8px; padding:11px 16px; font-weight:700; cursor:pointer; }
     .primary { background:#1f6feb; color:white; }
     .secondary { background:#eef2f6; color:#25313c; }
     .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
     .status { color:#5a6570; }
-    .metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }
+    .error { color:#a40000; font-weight:600; }
+    .metrics { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; }
     .metric { padding:12px; border-radius:10px; background:#f6f8fa; }
-    .metric b { display:block; font-size:24px; margin-top:4px; }
+    .metric b { display:block; font-size:22px; margin-top:4px; }
     .tablewrap { overflow:auto; max-height:70vh; border:1px solid #e0e4e8; border-radius:10px; }
-    table { width:100%; border-collapse:collapse; min-width:1250px; background:white; }
+    table { width:100%; border-collapse:collapse; min-width:1200px; background:white; }
     th, td { padding:9px 10px; border-bottom:1px solid #edf0f2; text-align:left; vertical-align:top; }
-    th { position:sticky; top:0; background:#f7f8fa; z-index:2; }
+    th { position:sticky; top:0; background:#f7f8fa; }
     td.num { white-space:nowrap; }
     a { color:#1f6feb; }
     .tag { display:inline-block; padding:3px 7px; background:#edf2f7; border-radius:999px; font-size:12px; }
     .good { background:#eaf7ed; }
     .warn { background:#fff4dd; }
-    .muted { color:#6b7280; }
-    .error { color:#a40000; font-weight:600; }
     @media (max-width:900px) {
       .grid { grid-template-columns:1fr; }
       .wide { grid-column:span 1; }
@@ -46,10 +45,9 @@
 </head>
 <body>
 <header>
-  <h1>Product Radar Pro</h1>
-  <p>Ricerca product-centric: parti dal prodotto e scopri dove compare online.</p>
+  <h1>Product Radar Pro v2</h1>
+  <p>Discovery rapido con Google/Serper; analisi profonda opzionale.</p>
 </header>
-
 <main>
   <section class="card">
     <div class="grid">
@@ -58,14 +56,13 @@
         <input id="product" value="Mela Golden Melinda">
       </div>
       <div>
-        <label>Massimo pagine da analizzare</label>
-        <input id="maxPages" type="number" min="5" max="100" value="50">
+        <label>Massimo risultati</label>
+        <input id="maxPages" type="number" min="5" max="50" value="10">
       </div>
       <div>
-        <label>Pagine con browser reale</label>
-        <input id="browserPages" type="number" min="0" max="50" value="25">
+        <label>Pagine da analizzare in profondità</label>
+        <input id="browserPages" type="number" min="0" max="10" value="0">
       </div>
-
       <div class="wide">
         <label>Alias / varianti, una per riga</label>
         <textarea id="aliases">Golden Melinda
@@ -73,7 +70,6 @@ Golden Delicious Melinda
 Mele Golden Melinda
 Melinda Golden Delicious</textarea>
       </div>
-
       <div class="wide">
         <label>Esclusioni, una per riga</label>
         <textarea id="exclusions">succo
@@ -84,17 +80,16 @@ confettura
 aceto
 biscotti</textarea>
       </div>
-
       <div class="wide">
-        <label>Domini retailer prioritari, uno per riga (opzionale)</label>
+        <label>Domini retailer prioritari (opzionale)</label>
         <textarea id="domains" placeholder="carrefour.it&#10;conad.it&#10;despar.it"></textarea>
       </div>
     </div>
 
     <div class="toolbar">
-      <button id="searchBtn" class="primary">AVVIA RICERCA POTENZIATA</button>
+      <button id="searchBtn" class="primary">AVVIA RICERCA</button>
+      <button id="testBtn" class="secondary">Test Serper</button>
       <button id="exportBtn" class="secondary" disabled>Esporta Excel</button>
-      <button id="historyBtn" class="secondary">Storico</button>
       <span id="status" class="status"></span>
     </div>
   </section>
@@ -109,37 +104,31 @@ biscotti</textarea>
         <thead>
           <tr>
             <th>Fonte</th><th>Prodotto trovato</th><th>Prezzo</th><th>€/kg</th>
-            <th>Formato</th><th>Promo</th><th>Disponibilità</th><th>Marca</th>
-            <th>Score</th><th>Motore</th><th>Pagina</th>
+            <th>Formato</th><th>Promo</th><th>Score</th><th>Motore</th><th>Pagina</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
   </section>
-
-  <section id="historyCard" class="card" style="display:none">
-    <h2>Storico</h2>
-    <div id="history"></div>
-  </section>
 </main>
 
 <script>
 let lastRun = null;
+const lines = id => document.getElementById(id).value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const money = v => (v === null || v === undefined || v === "") ? "" : Number(v).toLocaleString("it-IT",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
 
-const lines = id => document.getElementById(id).value
-  .split(/\r?\n/)
-  .map(x => x.trim())
-  .filter(Boolean);
-
-function money(v) {
-  if (v === null || v === undefined || v === "") return "";
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toLocaleString("it-IT", {minimumFractionDigits:2, maximumFractionDigits:2}) + " €" : "";
-}
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+async function readJsonSafe(response) {
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Il server ha restituito HTML/testo invece di JSON (HTTP ${response.status}). Dettaglio: ${text.slice(0,160).replace(/\s+/g," ")}`);
+  }
+  if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+  return data;
 }
 
 function render(run) {
@@ -154,9 +143,10 @@ function render(run) {
 
   document.getElementById("metrics").innerHTML = `
     <div class="metric">Risultati<b>${run.results.length}</b></div>
+    <div class="metric">Candidati<b>${run.candidates}</b></div>
     <div class="metric">Fonti<b>${domains}</b></div>
     <div class="metric">Con prezzo<b>${withPrice}</b></div>
-    <div class="metric">Promozioni<b>${promos}</b></div>
+    <div class="metric">Query<b>${run.queries}</b></div>
     <div class="metric">Tempo<b>${Math.round(run.durationMs/1000)} s</b></div>
   `;
 
@@ -168,21 +158,35 @@ function render(run) {
       <td class="num">${money(x.priceKg)}</td>
       <td>${esc(x.format || "")}</td>
       <td>${x.promotion ? '<span class="tag good">Sì</span>' : ''}</td>
-      <td>${esc(x.availability || "")}</td>
-      <td>${esc(x.brand || "")}</td>
       <td><span class="tag ${x.relevanceScore >= 8 ? 'good' : x.relevanceScore >= 4 ? 'warn' : ''}">${esc(x.relevanceScore)}</span></td>
-      <td>${esc(x.provider || "")}${x.usedBrowser ? '<br><span class="muted">browser</span>' : ''}</td>
+      <td>${esc(x.provider || "")}</td>
       <td><a href="${esc(x.url)}" target="_blank" rel="noreferrer">Apri</a></td>
     </tr>
   `).join("");
 }
+
+document.getElementById("testBtn").onclick = async () => {
+  const status = document.getElementById("status");
+  status.className = "status";
+  status.textContent = "Test Serper...";
+  try {
+    const r = await fetch("/api/test-serper?q=" + encodeURIComponent(document.getElementById("product").value.trim()));
+    const data = await readJsonSafe(r);
+    status.textContent = data.ok
+      ? `Serper OK: ${data.organicCount} risultati Google ricevuti.`
+      : `Serper non disponibile: ${data.error || "errore"}`;
+  } catch (e) {
+    status.className = "error";
+    status.textContent = e.message;
+  }
+};
 
 document.getElementById("searchBtn").onclick = async () => {
   const btn = document.getElementById("searchBtn");
   const status = document.getElementById("status");
   btn.disabled = true;
   status.className = "status";
-  status.textContent = "Ricerca multi-motore + analisi pagine in corso… può richiedere 1–3 minuti.";
+  status.textContent = "Ricerca Google/Serper in corso...";
 
   try {
     const r = await fetch("/api/search", {
@@ -193,14 +197,13 @@ document.getElementById("searchBtn").onclick = async () => {
         aliases: lines("aliases"),
         exclusions: lines("exclusions"),
         retailerDomains: lines("domains"),
-        maxPages: Number(document.getElementById("maxPages").value || 50),
-        browserPages: Number(document.getElementById("browserPages").value || 25)
+        maxPages: Number(document.getElementById("maxPages").value || 10),
+        browserPages: Number(document.getElementById("browserPages").value || 0)
       })
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Errore");
+    const data = await readJsonSafe(r);
     render(data);
-    status.textContent = `Completato: ${data.results.length} risultati utili da ${data.candidates} candidati.`;
+    status.textContent = `Completato: ${data.results.length} risultati utili da ${data.candidates} candidati in ${Math.round(data.durationMs/1000)} s.`;
   } catch (e) {
     status.className = "error";
     status.textContent = e.message;
@@ -222,16 +225,6 @@ document.getElementById("exportBtn").onclick = async () => {
   a.download = (lastRun.product || "Product_Radar").replace(/[^\w\-]+/g, "_") + ".xlsx";
   a.click();
   URL.revokeObjectURL(a.href);
-};
-
-document.getElementById("historyBtn").onclick = async () => {
-  const product = document.getElementById("product").value.trim();
-  const r = await fetch("/api/history?product=" + encodeURIComponent(product) + "&limit=20");
-  const data = await r.json();
-  document.getElementById("historyCard").style.display = "";
-  document.getElementById("history").innerHTML = data.length ? data.map(run => `
-    <p><b>${new Date(run.createdAt).toLocaleString("it-IT")}</b> — ${run.results.length} risultati, ${Math.round(run.durationMs/1000)} s</p>
-  `).join("") : "<p>Nessuna rilevazione precedente.</p>";
 };
 </script>
 </body>

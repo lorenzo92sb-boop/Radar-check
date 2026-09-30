@@ -7,7 +7,7 @@ const PRODUCE_SYNONYMS = new Map([
   ["pomodoro", ["pomodori"]],
   ["patata", ["patate"]],
   ["cipolla", ["cipolle"]],
-  ["finocchio", ["finocchi"]],
+  ["finocchio", ["finocchi"]]
 ]);
 
 export function normalizeText(s = "") {
@@ -44,19 +44,23 @@ export function buildQueries(product, aliases = [], retailerDomains = [], maxPag
   const seeds = buildAliases(product, aliases);
   const q = [];
 
-  // Poche query ad alto rendimento: evita decine di chiamate e timeout su Render Free.
-  q.push(`"${product}"`);
-  q.push(`"${product}" prezzo offerta`);
-  q.push(`"${product}" supermercato "spesa online"`);
+  // Query pensate per trovare PAGINE COMMERCIALI, non pagine informative.
+  q.push(`"${product}" prezzo`);
+  q.push(`"${product}" offerta`);
+  q.push(`"${product}" supermercato`);
+  q.push(`"${product}" "spesa online"`);
+  q.push(`"${product}" kg`);
+  q.push(`"${product}" acquista`);
 
-  if (seeds[1]) q.push(`"${seeds[1]}" prezzo`);
-  if (seeds[2]) q.push(`"${seeds[2]}" volantino`);
+  if (seeds[1]) q.push(`"${seeds[1]}" prezzo kg`);
+  if (seeds[2]) q.push(`"${seeds[2]}" supermercato`);
 
-  for (const domain of retailerDomains.filter(Boolean).slice(0, 5)) {
+  // Query mirate ai retailer indicati dall'utente.
+  for (const domain of retailerDomains.filter(Boolean).slice(0, 8)) {
     q.push(`site:${domain} "${product}"`);
+    if (seeds[1]) q.push(`site:${domain} "${seeds[1]}"`);
   }
 
-  // 5–10 query per esecuzione sono sufficienti; con Serper preserva i crediti gratuiti.
-  const maxQueries = maxPages <= 10 ? 5 : maxPages <= 25 ? 7 : 10;
+  const maxQueries = maxPages <= 10 ? 6 : maxPages <= 25 ? 10 : 14;
   return [...new Set(q)].slice(0, maxQueries);
 }

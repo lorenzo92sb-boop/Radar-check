@@ -12,10 +12,22 @@ const PRODUCE_SYNONYMS = new Map([
   ["limone", ["limoni"]]
 ]);
 
-const DEFAULT_GDO_GROUPS = [
-  ["carrefour.it", "conad.it", "coop.it", "bennet.com", "despar.it"],
-  ["esselunga.it", "pamretailpro.it", "tigros.it", "iper.it", "famila.it"],
-  ["decoacasa.multicedi.it", "penny.it", "mdspa.it", "lidl.it", "eurospin.it"]
+export const KNOWN_RETAILERS = [
+  "carrefour.it",
+  "conad.it",
+  "coop.it",
+  "bennet.com",
+  "despar.it",
+  "esselunga.it",
+  "famila.it",
+  "iper.it",
+  "pamretailpro.it",
+  "tigros.it",
+  "decoacasa.multicedi.it",
+  "penny.it",
+  "mdspa.it",
+  "lidl.it",
+  "eurospin.it"
 ];
 
 export function normalizeText(s = "") {
@@ -52,37 +64,37 @@ export function buildAliases(product, manualAliases = []) {
   return [...set].filter(Boolean);
 }
 
-function siteGroupQuery(product, domains) {
-  const parts = domains.map(d => `site:${d}`).join(" OR ");
-  return `"${product}" (${parts})`;
-}
-
-export function buildQueries(product, aliases = [], retailerDomains = [], maxResults = 20) {
+export function buildQueries(product, aliases = [], retailerDomains = [], maxResults = 20, gdoExtended = true) {
   const seeds = buildAliases(product, aliases);
   const q = [];
 
-  // Ricerca commerciale generica
+  // Query commerciali generiche
   q.push(`"${product}" prezzo`);
   q.push(`"${product}" "al kg"`);
   q.push(`"${product}" offerta supermercato`);
   q.push(`"${product}" "spesa online"`);
-  q.push(`"${product}" acquista shop`);
+  q.push(`"${product}" acquista`);
   q.push(`"${product}" confezione kg`);
+  q.push(`"${product}" volantino`);
+  q.push(`"${product}" e-commerce`);
 
   if (seeds[1]) q.push(`"${seeds[1]}" prezzo kg`);
-  if (seeds[2]) q.push(`"${seeds[2]}" supermercato offerta`);
+  if (seeds[2]) q.push(`"${seeds[2]}" supermercato`);
 
-  // GDO principali: poche query di gruppo, molto più efficienti di 15 query singole.
-  for (const group of DEFAULT_GDO_GROUPS) {
-    q.push(siteGroupQuery(product, group));
-  }
-
-  // Domini scelti dall'utente: priorità alta.
-  for (const domain of retailerDomains.filter(Boolean).slice(0, 8)) {
+  // Domini forniti dall'utente: massima priorità.
+  for (const domain of retailerDomains.filter(Boolean).slice(0, 10)) {
     q.push(`site:${domain} "${product}"`);
-    if (seeds[1]) q.push(`site:${domain} "${seeds[1]}"`);
   }
 
-  const maxQueries = maxResults <= 10 ? 8 : maxResults <= 25 ? 12 : 16;
+  // Ricerca GDO estesa: una query per retailer.
+  if (gdoExtended) {
+    const chosen = KNOWN_RETAILERS.filter(d => !retailerDomains.includes(d));
+    for (const domain of chosen) {
+      q.push(`site:${domain} "${product}"`);
+    }
+  }
+
+  // Con GDO estesa arriviamo fino a ~25 query, accettabile con Serper.
+  const maxQueries = gdoExtended ? 26 : (maxResults <= 10 ? 8 : maxResults <= 25 ? 12 : 16);
   return [...new Set(q)].slice(0, maxQueries);
 }

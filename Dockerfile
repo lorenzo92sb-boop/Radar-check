@@ -2,11 +2,13 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
-COPY package.json ./
+COPY Product_Radar_Pro/Product_Radar_Pro/package.json ./
+
 RUN npm install --omit=dev
+
 RUN npx playwright install --with-deps chromium
 
-COPY . .
+COPY Product_Radar_Pro/Product_Radar_Pro/. .
 
 ENV PORT=3000
 ENV NODE_ENV=production

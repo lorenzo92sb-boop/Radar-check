@@ -8,8 +8,6 @@ const PRODUCE_SYNONYMS = new Map([
   ["patata", ["patate"]],
   ["cipolla", ["cipolle"]],
   ["finocchio", ["finocchi"]],
-  ["arancia", ["arance"]],
-  ["limone", ["limoni"]],
 ]);
 
 export function normalizeText(s = "") {
@@ -34,7 +32,6 @@ export function buildAliases(product, manualAliases = []) {
     }
   }
 
-  // Variante utile: rimuove una parola generica iniziale (mela, mele, kiwi, ecc.).
   const words = product.trim().split(/\s+/);
   if (words.length >= 3 && /^(mela|mele|pera|pere|kiwi|uva|patata|patate|cipolla|cipolle|pomodoro|pomodori|finocchio|finocchi)$/i.test(words[0])) {
     set.add(words.slice(1).join(" "));
@@ -43,25 +40,23 @@ export function buildAliases(product, manualAliases = []) {
   return [...set].filter(Boolean);
 }
 
-export function buildQueries(product, aliases, retailerDomains = []) {
-  const all = new Set();
+export function buildQueries(product, aliases = [], retailerDomains = [], maxPages = 20) {
   const seeds = buildAliases(product, aliases);
+  const q = [];
 
-  for (const seed of seeds) {
-    const q = `"${seed}"`;
-    all.add(`${q} prezzo`);
-    all.add(`${q} offerta`);
-    all.add(`${q} supermercato`);
-    all.add(`${q} "spesa online"`);
-    all.add(`${q} volantino`);
-    all.add(`${q} shop`);
+  // Poche query ad alto rendimento: evita decine di chiamate e timeout su Render Free.
+  q.push(`"${product}"`);
+  q.push(`"${product}" prezzo offerta`);
+  q.push(`"${product}" supermercato "spesa online"`);
+
+  if (seeds[1]) q.push(`"${seeds[1]}" prezzo`);
+  if (seeds[2]) q.push(`"${seeds[2]}" volantino`);
+
+  for (const domain of retailerDomains.filter(Boolean).slice(0, 5)) {
+    q.push(`site:${domain} "${product}"`);
   }
 
-  for (const domain of retailerDomains.filter(Boolean)) {
-    for (const seed of seeds.slice(0, 3)) {
-      all.add(`site:${domain} "${seed}"`);
-    }
-  }
-
-  return [...all].slice(0, 60);
+  // 5–10 query per esecuzione sono sufficienti; con Serper preserva i crediti gratuiti.
+  const maxQueries = maxPages <= 10 ? 5 : maxPages <= 25 ? 7 : 10;
+  return [...new Set(q)].slice(0, maxQueries);
 }

@@ -47,7 +47,7 @@ const BRAND_DOMAINS = [
 const GENERIC_PRODUCT_WORDS = new Set([
   "mela","mele","pera","pere","kiwi","uva","frutta","ortofrutta",
   "pomodoro","pomodori","patata","patate","cipolla","cipolle",
-  "finocchio","finocchi","arancia","arance","limone","limoni"
+  "finocchio","finocchi","arancia","arance","limone","limoni","delicious"
 ]);
 
 function canonical(url = "") {
@@ -95,9 +95,7 @@ function sourceType(domain, text = "", fields = null) {
   ) {
     return "E-commerce";
   }
-  if (t.includes("frutta") || t.includes("ortofrutta") || t.includes("ortofrutt")) {
-    return "E-commerce";
-  }
+  if (t.includes("frutta") || t.includes("ortofrutta") || t.includes("ortofrutt")) return "E-commerce";
   return "Altro";
 }
 
@@ -105,7 +103,6 @@ function yearFromText(text = "") {
   const years = [...String(text).matchAll(/\b(20\d{2})\b/g)]
     .map(m => Number(m[1]))
     .filter(y => y >= 2000 && y <= CURRENT_YEAR + 1);
-
   if (!years.length) return null;
   return Math.max(...years);
 }
@@ -263,7 +260,6 @@ function dedupeRoundRobin(batches, maxItems) {
     for (const batch of batches) {
       const item = batch[index];
       if (!item) continue;
-
       const key = canonical(item.url);
       if (!key || seen.has(key)) continue;
 
@@ -279,17 +275,35 @@ function dedupeRoundRobin(batches, maxItems) {
   return out;
 }
 
+function dedupeSemantic(results) {
+  const byKey = new Map();
+
+  for (const x of results) {
+    const key = semanticKey(x);
+    const old = byKey.get(key);
+
+    if (!old) {
+      byKey.set(key, x);
+      continue;
+    }
+
+    // Preferisci pagina verificata, poi maggiore confidenza, poi score.
+    const rank = y =>
+      (String(y.verification || "").startsWith("Pagina verificata") ? 100 : 0) +
+      (y.confidence === "Alta" ? 20 : y.confidence === "Media" ? 10 : 0) +
+      (y.relevanceScore || 0);
+
+    if (rank(x) > rank(old)) byKey.set(key, x);
+  }
+
+  return [...byKey.values()];
+}
+
 function removeRedundantArchives(results) {
   const domainsWithCurrent = new Set(
-    results
-      .filter(x => x.freshness !== "Storico")
-      .map(x => x.domain)
+    results.filter(x => x.freshness !== "Storico").map(x => x.domain)
   );
-
-  return results.filter(x => {
-    if (x.freshness !== "Storico") return true;
-    return !domainsWithCurrent.has(x.domain);
-  });
+  return results.filter(x => x.freshness !== "Storico" || !domainsWithCurrent.has(x.domain));
 }
 
 function sortResults(a, b) {
@@ -355,10 +369,7 @@ app.post("/api/search", async (req, res) => {
       queries.map(q => searchLimit(() => multiSearch(q, 10)))
     );
 
-    const raw = dedupeRoundRobin(
-      batches,
-      Math.max(maxResults * 7, 100)
-    );
+    const raw = dedupeRoundRobin(batches, Math.max(maxResults * 7, 100));
 
     let results = raw
       .map(item => quickExtract(item, product, expandedAliases, exclusions, strictMatch))
@@ -366,16 +377,7 @@ app.post("/api/search", async (req, res) => {
       .filter(x => x.relevanceScore >= 12)
       .sort(sortResults);
 
-    const byKey = new Map();
-    for (const x of results) {
-      const key = semanticKey(x);
-      const old = byKey.get(key);
-      if (!old || (x.relevanceScore ?? 0) > (old.relevanceScore ?? 0)) {
-        byKey.set(key, x);
-      }
-    }
-
-    results = removeRedundantArchives([...byKey.values()]).sort(sortResults);
+    results = removeRedundantArchives(dedupeSemantic(results)).sort(sortResults);
 
     if (deepPages > 0 && results.length > 0) {
       const candidates = results
@@ -412,11 +414,11 @@ app.post("/api/search", async (req, res) => {
         const d = deepByUrl.get(canonical(x.url));
         if (!d) return x;
 
-        if (d.blocked) {
-          // NON sostituire il titolo corretto con "Access Denied".
+        // Non contaminare dati Google con pagine categoria o anti-bot.
+        if (d.blocked || d.identityMismatch) {
           return {
             ...x,
-            verification: "Accesso pagina bloccato - dati da Google",
+            verification: d.verification || x.verification,
             confidence: x.confidence === "Alta" ? "Media" : x.confidence
           };
         }
@@ -437,6 +439,9 @@ app.post("/api/search", async (req, res) => {
         };
       });
     }
+
+    // Secondo dedupe DOPO la verifica profonda.
+    results = dedupeSemantic(results);
 
     if (!includeSecondary) {
       results = results.filter(x =>
@@ -532,11 +537,11 @@ app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     serper: Boolean(process.env.SERPER_API_KEY),
-    version: "6.0"
+    version: "7.0"
   });
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Product Radar Pro v6 attivo sulla porta ${port}`);
+  console.log(`Product Radar Pro v7 attivo sulla porta ${port}`);
 });

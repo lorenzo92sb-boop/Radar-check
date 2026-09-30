@@ -5,7 +5,7 @@ import pLimit from "p-limit";
 import XLSX from "xlsx";
 
 import { buildAliases, buildQueries } from "./lib/query.js";
-import { multiSearch } from "./lib/searchProviders.js";
+import { multiSearch, testSerper } from "./lib/searchProviders.js";
 import { analyzeResult } from "./lib/extract.js";
 import { appendRun, readHistory } from "./lib/history.js";
 
@@ -41,73 +41,167 @@ function dedupe(items) {
   return out;
 }
 
+function hostName(url = "") {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch { return ""; }
+}
+
+function n(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().replace(/[^\d,.\-]/g, "");
+  if (!s) return null;
+  if (s.includes(",") && s.includes(".")) return Number(s.replace(/\./g, "").replace(",", "."));
+  if (s.includes(",")) return Number(s.replace(",", "."));
+  const x = Number(s);
+  return Number.isFinite(x) ? x : null;
+}
+
+function quickExtract(item, aliases, exclusions) {
+  const text = `${item.title || ""} ${item.snippet || ""}`.replace(/\s+/g, " ").trim();
+  const lower = text.toLowerCase();
+
+  let score = 0;
+  const matched = new Set();
+  for (const alias of aliases) {
+    for (const tok of String(alias).toLowerCase().split(/\s+/).filter(x => x.length >= 3)) {
+      if (lower.includes(tok)) {
+        score += 2;
+        matched.add(tok);
+      }
+    }
+  }
+  for (const ex of exclusions) {
+    if (ex && lower.includes(String(ex).toLowerCase())) score -= 4;
+  }
+
+  const kgMatch = text.match(/(?:€\s*)?(\d{1,3}(?:[.,]\d{2}))\s*(?:€)?\s*(?:\/|al|per)\s*kg\b/i);
+  const priceMatch = text.match(/(?:€\s*)?(\d{1,3}(?:[.,]\d{2}))\s*€/i) || text.match(/€\s*(\d{1,3}(?:[.,]\d{2}))/i);
+  const formatMatch = text.match(/\b(\d+(?:[.,]\d+)?)\s*(kg|g|gr|grammi|pz|pezzi|confezioni?)\b/i);
+
+  return {
+    queryTitle: item.title || "",
+    title: item.title || "",
+    url: item.url || "",
+    domain: hostName(item.url),
+    provider: item.provider || "",
+    snippet: item.snippet || "",
+    price: priceMatch ? n(priceMatch[1]) : null,
+    priceKg: kgMatch ? n(kgMatch[1]) : null,
+    currency: (priceMatch || kgMatch) ? "EUR" : null,
+    format: formatMatch ? `${formatMatch[1]} ${formatMatch[2]}` : null,
+    promotion: /\b(offerta|promo|promozione|sconto|volantino|sottocosto)\b/i.test(text),
+    availability: null,
+    brand: null,
+    sku: null,
+    detectedDate: null,
+    relevanceScore: score,
+    matchedTokens: [...matched],
+    evidence: item.snippet || "",
+    usedBrowser: false,
+    quickResult: true
+  };
+}
+
 function resultKey(x) {
   return `${x.domain}|${String(x.title || "").toLowerCase().replace(/\s+/g, " ").slice(0, 120)}|${x.price ?? ""}|${x.priceKg ?? ""}`;
 }
 
+app.get("/api/test-serper", async (req, res) => {
+  try {
+    const q = String(req.query.q || "Mela Golden Melinda");
+    const out = await testSerper(q);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
 app.post("/api/search", async (req, res) => {
   const started = Date.now();
-  const product = String(req.body.product || "").trim();
-  if (!product) return res.status(400).json({ error: "Prodotto mancante" });
 
-  const aliases = Array.isArray(req.body.aliases) ? req.body.aliases.filter(Boolean) : [];
-  const exclusions = Array.isArray(req.body.exclusions) ? req.body.exclusions.filter(Boolean) : [];
-  const retailerDomains = Array.isArray(req.body.retailerDomains) ? req.body.retailerDomains.filter(Boolean) : [];
+  try {
+    const product = String(req.body.product || "").trim();
+    if (!product) return res.status(400).json({ error: "Prodotto mancante" });
 
-  const maxPages = Math.min(Math.max(Number(req.body.maxPages || 40), 5), 100);
-  const browserPages = Math.min(Math.max(Number(req.body.browserPages || 20), 0), 50);
+    const aliases = Array.isArray(req.body.aliases) ? req.body.aliases.filter(Boolean) : [];
+    const exclusions = Array.isArray(req.body.exclusions) ? req.body.exclusions.filter(Boolean) : [];
+    const retailerDomains = Array.isArray(req.body.retailerDomains) ? req.body.retailerDomains.filter(Boolean) : [];
 
-  const expandedAliases = buildAliases(product, aliases);
-  const queries = buildQueries(product, aliases, retailerDomains);
+    const maxPages = Math.min(Math.max(Number(req.body.maxPages || 20), 5), 50);
+    const browserPages = Math.min(Math.max(Number(req.body.browserPages || 0), 0), 10);
 
-  const searchLimit = pLimit(4);
-  const rawBatches = await Promise.all(
-    queries.map(q => searchLimit(() => multiSearch(q, 12)))
-  );
+    const expandedAliases = buildAliases(product, aliases);
+    const queries = buildQueries(product, aliases, retailerDomains, maxPages);
 
-  const raw = dedupe(rawBatches.flat()).slice(0, maxPages);
+    // Fase 1: discovery veloce. Poche query, Serper prioritario.
+    const searchLimit = pLimit(2);
+    const rawBatches = await Promise.all(
+      queries.map(q => searchLimit(() => multiSearch(q, 10)))
+    );
 
-  const analyzeLimit = pLimit(4);
-  let renderedCount = 0;
+    const raw = dedupe(rawBatches.flat()).slice(0, maxPages);
 
-  const analyzed = await Promise.all(
-    raw.map(item => analyzeLimit(async () => {
-      const allowBrowser = renderedCount < browserPages;
-      if (allowBrowser) renderedCount++;
-      return analyzeResult(item, expandedAliases, exclusions, allowBrowser);
-    }))
-  );
+    // Restituisce sempre una base di risultati da titoli/snippet.
+    let results = raw
+      .map(item => quickExtract(item, expandedAliases, exclusions))
+      .filter(x => (x.relevanceScore ?? 0) >= 2);
 
-  const byKey = new Map();
-  for (const x of analyzed) {
-    // Tiene solo risultati almeno moderatamente pertinenti.
-    if ((x.relevanceScore ?? 0) < 2) continue;
-    const k = resultKey(x);
-    const old = byKey.get(k);
-    if (!old || (x.relevanceScore ?? 0) > (old.relevanceScore ?? 0)) byKey.set(k, x);
-  }
+    // Fase 2 opzionale: analisi profonda solo delle prime N pagine.
+    if (browserPages > 0 && raw.length > 0) {
+      const deepCandidates = raw.slice(0, Math.min(browserPages, raw.length));
+      const analyzeLimit = pLimit(2);
 
-  const results = [...byKey.values()]
-    .sort((a, b) => {
+      const deep = await Promise.all(
+        deepCandidates.map(item =>
+          analyzeLimit(() => analyzeResult(item, expandedAliases, exclusions, true))
+        )
+      );
+
+      const deepByUrl = new Map(deep.map(x => [canonical(x.url), x]));
+      results = results.map(x => deepByUrl.get(canonical(x.url)) || x);
+
+      // Aggiunge eventuali risultati deep non presenti nei quick.
+      for (const x of deep) {
+        if (!results.some(r => canonical(r.url) === canonical(x.url))) results.push(x);
+      }
+    }
+
+    const byKey = new Map();
+    for (const x of results) {
+      if ((x.relevanceScore ?? 0) < 2) continue;
+      const k = resultKey(x);
+      const old = byKey.get(k);
+      if (!old || (x.relevanceScore ?? 0) > (old.relevanceScore ?? 0)) byKey.set(k, x);
+    }
+
+    results = [...byKey.values()].sort((a, b) => {
       const ap = (a.price !== null || a.priceKg !== null) ? 1 : 0;
       const bp = (b.price !== null || b.priceKg !== null) ? 1 : 0;
       if (bp !== ap) return bp - ap;
       return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
     });
 
-  const run = {
-    id: `run_${Date.now()}`,
-    product,
-    aliases: expandedAliases,
-    createdAt: new Date().toISOString(),
-    durationMs: Date.now() - started,
-    queries: queries.length,
-    candidates: raw.length,
-    results
-  };
+    const run = {
+      id: `run_${Date.now()}`,
+      product,
+      aliases: expandedAliases,
+      createdAt: new Date().toISOString(),
+      durationMs: Date.now() - started,
+      queries: queries.length,
+      candidates: raw.length,
+      serperEnabled: Boolean(process.env.SERPER_API_KEY),
+      results
+    };
 
-  appendRun(run);
-  res.json(run);
+    appendRun(run);
+    res.json(run);
+  } catch (e) {
+    console.error("SEARCH_ERROR", e);
+    res.status(500).json({
+      error: "Errore durante la ricerca",
+      detail: e?.message || String(e)
+    });
+  }
 });
 
 app.get("/api/history", (req, res) => {
@@ -138,12 +232,6 @@ app.post("/api/export-xlsx", (req, res) => {
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws["!cols"] = [
-    { wch: 20 }, { wch: 28 }, { wch: 24 }, { wch: 50 },
-    { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 },
-    { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 16 },
-    { wch: 12 }, { wch: 16 }, { wch: 60 }, { wch: 80 }
-  ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Risultati");
   const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
@@ -157,22 +245,13 @@ app.post("/api/export-xlsx", (req, res) => {
 app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
+    serper: Boolean(process.env.SERPER_API_KEY),
     brave: Boolean(process.env.BRAVE_API_KEY),
-    serper: Boolean(process.env.SERPER_API_KEY)
-  });
-});
-
-app.post("/api/cron-search", async (req, res) => {
-  const secret = req.get("x-cron-secret");
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-  return res.status(501).json({
-    error: "Endpoint predisposto. Configura una lista monitoraggi prima di attivare il cron."
+    version: "2.0"
   });
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Product Radar Pro attivo sulla porta ${port}`);
+  console.log(`Product Radar Pro v2 attivo sulla porta ${port}`);
 });

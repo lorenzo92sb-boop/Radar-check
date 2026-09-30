@@ -37,6 +37,12 @@ const RETAILER_MAP = [
   ["pamretailpro.it", "Pam"]
 ];
 
+const GENERIC_PRODUCT_WORDS = new Set([
+  "mela","mele","pera","pere","kiwi","uva","frutta","ortofrutta",
+  "pomodoro","pomodori","patata","patate","cipolla","cipolle",
+  "finocchio","finocchi","arancia","arance","limone","limoni"
+]);
+
 function canonical(url = "") {
   try {
     const u = new URL(url);
@@ -104,25 +110,41 @@ function hardExcluded(text, exclusions) {
   });
 }
 
+function essentialTokens(product) {
+  return normalizeText(product)
+    .split(" ")
+    .filter(tok => tok.length >= 3 && !GENERIC_PRODUCT_WORDS.has(tok));
+}
+
+function titleProductMatch(title, product) {
+  const titleNorm = normalizeText(title);
+  const required = essentialTokens(product);
+
+  if (!required.length) return true;
+
+  // Tutti i token specifici devono essere nel titolo.
+  // Es. "Mela Golden Melinda" => titolo deve contenere Golden + Melinda.
+  return required.every(tok => titleNorm.includes(tok));
+}
+
 function productCoreTokens(product, aliases) {
-  const generic = new Set([
-    "mela","mele","pera","pere","kiwi","uva","frutta","italia","italiano","italiane",
-    "delicious","golden"
-  ]);
   const out = new Set();
   for (const s of [product, ...aliases]) {
     for (const tok of normalizeText(s).split(" ")) {
-      if (tok.length >= 3 && !generic.has(tok)) out.add(tok);
+      if (tok.length >= 3 && !GENERIC_PRODUCT_WORDS.has(tok)) out.add(tok);
     }
   }
   return out;
 }
 
-function quickExtract(item, product, aliases, exclusions) {
+function quickExtract(item, product, aliases, exclusions, strictMatch = true) {
   const text = `${item.title || ""} ${item.snippet || ""}`.replace(/\s+/g, " ").trim();
   const domain = hostname(item.url);
 
   if (hardExcluded(text, exclusions)) return null;
+
+  const exactTitle = titleProductMatch(item.title || "", product);
+  if (strictMatch && !exactTitle) return null;
 
   const normalized = normalizeText(text);
   const coreTokens = productCoreTokens(product, aliases);
@@ -131,10 +153,6 @@ function quickExtract(item, product, aliases, exclusions) {
   for (const tok of coreTokens) {
     if (normalized.includes(tok)) productMatch++;
   }
-
-  // Per "Mela Golden Melinda", il marchio Melinda è essenziale.
-  const brandMatch = normalized.includes("melinda");
-  if (!brandMatch && normalizeText(product).includes("melinda")) return null;
 
   const commercialSignals = [
     "prezzo","offerta","acquista","compra","shop","spesa","supermercato","€","eur",
@@ -156,20 +174,20 @@ function quickExtract(item, product, aliases, exclusions) {
 
   const type = sourceType(domain, text);
   if (type === "Informativo") penalty += 12;
-  if (type === "Social") penalty += 3;
+  if (type === "Social") penalty += 4;
 
   const f = extractCommercialFields(text);
   const fresh = freshness(text);
 
-  let score = (productMatch * 4) + (brandMatch ? 8 : 0) + (commercialScore * 2) - penalty;
+  let score = (productMatch * 4) + (exactTitle ? 10 : 0) + (commercialScore * 2) - penalty;
   if (f.packPrice !== null || f.priceKg !== null) score += 6;
-  if (type === "GDO / Retailer") score += 6;
+  if (type === "GDO / Retailer") score += 8;
   if (type === "E-commerce") score += 3;
-  if (fresh.label === "Storico") score -= 5;
+  if (fresh.label === "Storico") score -= 6;
 
   let confidence = "Bassa";
-  if (score >= 24 && (f.packPrice !== null || f.priceKg !== null)) confidence = "Alta";
-  else if (score >= 14) confidence = "Media";
+  if (exactTitle && score >= 24 && (f.packPrice !== null || f.priceKg !== null)) confidence = "Alta";
+  else if (exactTitle && score >= 16) confidence = "Media";
 
   const retailer = retailerName(domain);
 
@@ -181,6 +199,7 @@ function quickExtract(item, product, aliases, exclusions) {
     sourceType: type,
     provider: item.provider || "",
     snippet: item.snippet || "",
+    exactTitleMatch: exactTitle,
     packPrice: f.packPrice,
     price: f.packPrice,
     priceKg: f.priceKg,
@@ -202,8 +221,8 @@ function quickExtract(item, product, aliases, exclusions) {
 }
 
 function semanticKey(x) {
-  let title = normalizeText(x.title || "")
-    .replace(/\b(archivi|archivio|shop|online|spesa|domicilio)\b/g, "")
+  const title = normalizeText(x.title || "")
+    .replace(/\b(archivi|archivio|shop|online|spesa|domicilio|offerta)\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -211,7 +230,8 @@ function semanticKey(x) {
     x.domain,
     title.slice(0, 90),
     x.packPrice ?? "",
-    x.priceKg ?? ""
+    x.priceKg ?? "",
+    x.format ?? ""
   ].join("|");
 }
 
@@ -242,6 +262,19 @@ function dedupeRoundRobin(batches, maxItems) {
   }
 
   return out;
+}
+
+function removeRedundantArchives(results) {
+  const domainsWithCurrent = new Set(
+    results
+      .filter(x => x.freshness !== "Storico")
+      .map(x => x.domain)
+  );
+
+  return results.filter(x => {
+    if (x.freshness !== "Storico") return true;
+    return !domainsWithCurrent.has(x.domain);
+  });
 }
 
 function sortResults(a, b) {
@@ -291,31 +324,32 @@ app.post("/api/search", async (req, res) => {
       ? req.body.retailerDomains.filter(Boolean)
       : [];
 
+    const strictMatch = req.body.strictMatch !== false;
+    const gdoExtended = req.body.gdoExtended !== false;
+
     const maxResults = Math.min(Math.max(Number(req.body.maxPages || 20), 5), 50);
     const deepPages = Math.min(Math.max(Number(req.body.browserPages || 3), 0), 8);
 
     const expandedAliases = buildAliases(product, aliases);
-    const queries = buildQueries(product, aliases, retailerDomains, maxResults);
+    const queries = buildQueries(product, aliases, retailerDomains, maxResults, gdoExtended);
 
-    // 2 chiamate Google in parallelo massimo: stabile su Render Free.
-    const searchLimit = pLimit(2);
+    // 4 query in parallelo: Serper è rapido e non grava sulla RAM di Render.
+    const searchLimit = pLimit(4);
     const batches = await Promise.all(
       queries.map(q => searchLimit(() => multiSearch(q, 10)))
     );
 
-    // Prendiamo molti più candidati dei risultati finali.
     const raw = dedupeRoundRobin(
       batches,
-      Math.max(maxResults * 4, 40)
+      Math.max(maxResults * 6, 80)
     );
 
     let results = raw
-      .map(item => quickExtract(item, product, expandedAliases, exclusions))
+      .map(item => quickExtract(item, product, expandedAliases, exclusions, strictMatch))
       .filter(Boolean)
-      .filter(x => x.relevanceScore >= 10)
+      .filter(x => x.relevanceScore >= 12)
       .sort(sortResults);
 
-    // Dedupe semantico
     const byKey = new Map();
     for (const x of results) {
       const key = semanticKey(x);
@@ -324,9 +358,11 @@ app.post("/api/search", async (req, res) => {
         byKey.set(key, x);
       }
     }
-    results = [...byKey.values()].sort(sortResults);
 
-    // Analisi profonda: solo i migliori candidati, uno per volta.
+    results = [...byKey.values()];
+    results = removeRedundantArchives(results).sort(sortResults);
+
+    // Verifica profonda dei migliori risultati.
     if (deepPages > 0 && results.length > 0) {
       const candidates = results
         .filter(x => x.sourceType !== "Social" && x.freshness !== "Storico")
@@ -368,6 +404,7 @@ app.post("/api/search", async (req, res) => {
           ...d,
           retailer: x.retailer,
           sourceType: x.sourceType,
+          exactTitleMatch: x.exactTitleMatch,
           freshness: d.historical ? "Storico" : fresh.label,
           year: fresh.year,
           relevanceScore: Math.max(x.relevanceScore || 0, d.relevanceScore || 0),
@@ -376,9 +413,9 @@ app.post("/api/search", async (req, res) => {
       });
     }
 
-    // Riclassifica e limita il risultato finale.
     results = results
       .filter(x => x.sourceType !== "Informativo")
+      .filter(x => !strictMatch || x.exactTitleMatch)
       .sort(sortResults)
       .slice(0, maxResults);
 
@@ -391,6 +428,8 @@ app.post("/api/search", async (req, res) => {
       queries: queries.length,
       candidates: raw.length,
       deepRequested: deepPages,
+      strictMatch,
+      gdoExtended,
       serperEnabled: Boolean(process.env.SERPER_API_KEY),
       results
     };
@@ -422,6 +461,7 @@ app.post("/api/export-xlsx", (req, res) => {
     "Fonte": x.domain || "",
     "Tipo fonte": x.sourceType || "",
     "Prodotto trovato": x.title || "",
+    "Match titolo": x.exactTitleMatch ? "Esatto" : "Ampio",
     "Prezzo confezione €": x.packPrice ?? "",
     "Prezzo €/kg": x.priceKg ?? "",
     "€/kg calcolato": x.priceKgComputed ? "Sì" : "No",
@@ -439,12 +479,6 @@ app.post("/api/export-xlsx", (req, res) => {
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws["!cols"] = [
-    {wch:20},{wch:18},{wch:25},{wch:18},{wch:50},{wch:18},{wch:14},{wch:15},
-    {wch:14},{wch:14},{wch:18},{wch:12},{wch:18},{wch:14},{wch:22},{wch:14},
-    {wch:18},{wch:70},{wch:90}
-  ];
-
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Risultati");
 
@@ -467,11 +501,11 @@ app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     serper: Boolean(process.env.SERPER_API_KEY),
-    version: "4.0"
+    version: "5.0"
   });
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Product Radar Pro v4 attivo sulla porta ${port}`);
+  console.log(`Product Radar Pro v5 attivo sulla porta ${port}`);
 });

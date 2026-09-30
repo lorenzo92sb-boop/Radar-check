@@ -3,56 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Product Radar Pro v6</title>
+  <title>Product Radar Pro v7</title>
   <style>
     :root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#1d232a;background:#f4f6f8}
-    *{box-sizing:border-box}
-    body{margin:0}
+    *{box-sizing:border-box} body{margin:0}
     header{background:white;border-bottom:1px solid #ddd;padding:18px 24px}
-    h1{margin:0;font-size:24px}
-    header p{margin:5px 0 0;color:#64707d}
+    h1{margin:0;font-size:24px} header p{margin:5px 0 0;color:#64707d}
     main{max-width:1700px;margin:22px auto;padding:0 18px 40px}
     .card{background:white;border:1px solid #e0e4e8;border-radius:14px;padding:18px;margin-bottom:18px}
-    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-    .wide{grid-column:span 2}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.wide{grid-column:span 2}
     label{font-weight:600;display:block;margin-bottom:6px}
     input,textarea{width:100%;padding:10px 11px;border:1px solid #cbd2d9;border-radius:8px;font:inherit}
     textarea{min-height:92px;resize:vertical}
-    .checkrow{display:flex;align-items:center;gap:8px;margin-top:8px}
-    .checkrow input{width:auto}
+    .checkrow{display:flex;align-items:center;gap:8px;margin-top:8px}.checkrow input{width:auto}
     button{border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:pointer}
-    .primary{background:#1f6feb;color:white}
-    .secondary{background:#eef2f6;color:#25313c}
+    .primary{background:#1f6feb;color:white}.secondary{background:#eef2f6;color:#25313c}
     .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
-    .status{color:#5a6570}
-    .error{color:#a40000;font-weight:600}
+    .status{color:#5a6570}.error{color:#a40000;font-weight:600}
     .metrics{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
-    .metric{padding:12px;border-radius:10px;background:#f6f8fa}
-    .metric b{display:block;font-size:22px;margin-top:4px}
+    .metric{padding:12px;border-radius:10px;background:#f6f8fa}.metric b{display:block;font-size:22px;margin-top:4px}
     .tablewrap{overflow:auto;max-height:72vh;border:1px solid #e0e4e8;border-radius:10px}
     table{width:100%;border-collapse:collapse;min-width:1750px;background:white}
     th,td{padding:9px 10px;border-bottom:1px solid #edf0f2;text-align:left;vertical-align:top}
-    th{position:sticky;top:0;background:#f7f8fa;z-index:2}
-    td.num{white-space:nowrap}
-    a{color:#1f6feb}
+    th{position:sticky;top:0;background:#f7f8fa;z-index:2} td.num{white-space:nowrap} a{color:#1f6feb}
     .tag{display:inline-block;padding:3px 7px;background:#edf2f7;border-radius:999px;font-size:12px;white-space:nowrap}
-    .good{background:#eaf7ed}
-    .warn{background:#fff4dd}
-    .bad{background:#fdecec}
-    .muted{color:#6b7280;font-size:12px}
-    @media(max-width:900px){
-      .grid{grid-template-columns:1fr}
-      .wide{grid-column:span 1}
-      .metrics{grid-template-columns:1fr 1fr}
-    }
+    .good{background:#eaf7ed}.warn{background:#fff4dd}.bad{background:#fdecec}.muted{color:#6b7280;font-size:12px}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}.wide{grid-column:span 1}.metrics{grid-template-columns:1fr 1fr}}
   </style>
 </head>
 <body>
 <header>
-  <h1>Product Radar Pro v6</h1>
-  <p>Ricerca GDO più ampia, fonti secondarie filtrabili e gestione anti-bot.</p>
+  <h1>Product Radar Pro v7</h1>
+  <p>Verifica sicura: le pagine categoria non possono più contaminare prezzi e formati del prodotto.</p>
 </header>
-
 <main>
   <section class="card">
     <div class="grid">
@@ -64,12 +47,10 @@
           <label for="strictMatch" style="margin:0">Solo corrispondenze esatte del prodotto</label>
         </div>
       </div>
-
       <div>
         <label>Massimo risultati finali</label>
         <input id="maxPages" type="number" min="5" max="50" value="25">
       </div>
-
       <div>
         <label>Pagine da verificare in profondità</label>
         <input id="browserPages" type="number" min="0" max="8" value="3">
@@ -78,7 +59,6 @@
           <label for="gdoExtended" style="margin:0">Ricerca GDO estesa</label>
         </div>
       </div>
-
       <div class="wide">
         <label>Alias / varianti, una per riga</label>
         <textarea id="aliases">Golden Melinda
@@ -86,7 +66,6 @@ Golden Delicious Melinda
 Mele Golden Melinda
 Melinda Golden Delicious</textarea>
       </div>
-
       <div class="wide">
         <label>Esclusioni rigide, una per riga</label>
         <textarea id="exclusions">succo
@@ -99,7 +78,6 @@ biscotti
 squeez
 purea</textarea>
       </div>
-
       <div class="wide">
         <label>Retailer prioritari aggiuntivi (opzionale)</label>
         <textarea id="domains" placeholder="es. tosano.it&#10;mercato.it"></textarea>
@@ -109,7 +87,6 @@ purea</textarea>
         </div>
       </div>
     </div>
-
     <div class="toolbar">
       <button id="searchBtn" class="primary">AVVIA RICERCA</button>
       <button id="testBtn" class="secondary">Test Serper</button>
@@ -118,28 +95,16 @@ purea</textarea>
     </div>
   </section>
 
-  <section id="summaryCard" class="card" style="display:none">
-    <div id="metrics" class="metrics"></div>
-  </section>
+  <section id="summaryCard" class="card" style="display:none"><div id="metrics" class="metrics"></div></section>
 
   <section id="resultsCard" class="card" style="display:none">
     <div class="tablewrap">
       <table>
         <thead>
           <tr>
-            <th>Insegna / Fonte</th>
-            <th>Tipo</th>
-            <th>Prodotto trovato</th>
-            <th>Prezzo conf.</th>
-            <th>€/kg</th>
-            <th>Formato</th>
-            <th>Calibro</th>
-            <th>Origine</th>
-            <th>Promo</th>
-            <th>Freschezza</th>
-            <th>Verifica</th>
-            <th>Confidenza</th>
-            <th>Pagina</th>
+            <th>Insegna / Fonte</th><th>Tipo</th><th>Prodotto trovato</th><th>Prezzo conf.</th>
+            <th>€/kg</th><th>Formato</th><th>Calibro</th><th>Origine</th><th>Promo</th>
+            <th>Freschezza</th><th>Verifica</th><th>Confidenza</th><th>Pagina</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -149,181 +114,76 @@ purea</textarea>
 </main>
 
 <script>
-let lastRun = null;
-
-const lines = id =>
-  document.getElementById(id).value
-    .split(/\r?\n/)
-    .map(x => x.trim())
-    .filter(Boolean);
-
-const esc = s =>
-  String(s ?? "").replace(/[&<>"']/g, m => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[m]));
-
-const money = v =>
-  (v === null || v === undefined || v === "")
-    ? ""
-    : Number(v).toLocaleString("it-IT", {
-        minimumFractionDigits:2,
-        maximumFractionDigits:2
-      }) + " €";
-
-async function readJsonSafe(response) {
-  const text = await response.text();
-  let data;
-  try { data = JSON.parse(text); }
-  catch {
-    throw new Error(
-      `Risposta server non valida (HTTP ${response.status}): ` +
-      text.slice(0,160).replace(/\s+/g," ")
-    );
-  }
-  if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
-  return data;
+let lastRun=null;
+const lines=id=>document.getElementById(id).value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const money=v=>(v===null||v===undefined||v==="")?"":Number(v).toLocaleString("it-IT",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+async function readJsonSafe(response){
+  const text=await response.text();let data;
+  try{data=JSON.parse(text)}catch{throw new Error(`Risposta server non valida (HTTP ${response.status}): ${text.slice(0,160).replace(/\s+/g," ")}`)}
+  if(!response.ok)throw new Error(data.detail||data.error||`HTTP ${response.status}`);return data;
 }
-
-function tag(text, kind="") {
-  if (!text) return "";
-  return `<span class="tag ${kind}">${esc(text)}</span>`;
-}
-
-function render(run) {
-  lastRun = run;
-  document.getElementById("summaryCard").style.display = "";
-  document.getElementById("resultsCard").style.display = "";
-  document.getElementById("exportBtn").disabled = false;
-
-  const withPrice = run.results.filter(x => x.packPrice !== null || x.priceKg !== null).length;
-  const verified = run.results.filter(x => String(x.verification || "").startsWith("Pagina verificata")).length;
-  const blocked = run.results.filter(x => String(x.verification || "").includes("bloccato")).length;
-  const gdo = run.results.filter(x => x.sourceType === "GDO / Retailer").length;
-
-  document.getElementById("metrics").innerHTML = `
+function tag(text,kind=""){if(!text)return"";return `<span class="tag ${kind}">${esc(text)}</span>`}
+function render(run){
+  lastRun=run;document.getElementById("summaryCard").style.display="";document.getElementById("resultsCard").style.display="";
+  document.getElementById("exportBtn").disabled=false;
+  const withPrice=run.results.filter(x=>x.packPrice!==null||x.priceKg!==null).length;
+  const verified=run.results.filter(x=>String(x.verification||"").startsWith("Pagina verificata")).length;
+  const protectedRows=run.results.filter(x=>String(x.verification||"").includes("dati Google mantenuti")||String(x.verification||"").includes("bloccato")).length;
+  const gdo=run.results.filter(x=>x.sourceType==="GDO / Retailer").length;
+  document.getElementById("metrics").innerHTML=`
     <div class="metric">Risultati<b>${run.results.length}</b></div>
     <div class="metric">Candidati web<b>${run.candidates}</b></div>
     <div class="metric">GDO / Retailer<b>${gdo}</b></div>
     <div class="metric">Con prezzo<b>${withPrice}</b></div>
     <div class="metric">Pagine verificate<b>${verified}</b></div>
-    <div class="metric">Anti-bot<b>${blocked}</b></div>
-    <div class="metric">Tempo<b>${Math.round(run.durationMs/1000)} s</b></div>
-  `;
-
-  document.getElementById("tbody").innerHTML = run.results.map(x => {
-    const source = x.retailer || x.domain || "";
-    const freshKind = x.freshness === "Corrente" ? "good" : x.freshness === "Storico" ? "bad" : "warn";
-    const confKind = x.confidence === "Alta" ? "good" : x.confidence === "Bassa" ? "bad" : "warn";
-    const blocked = String(x.verification || "").includes("bloccato");
-
-    return `
-      <tr>
-        <td>
-          <b>${esc(source)}</b>
-          ${x.retailer ? `<div class="muted">${esc(x.domain)}</div>` : ""}
-        </td>
-        <td>${tag(x.sourceType || "")}</td>
-        <td>
-          ${esc(x.title || "")}
-          ${x.exactTitleMatch ? '<div class="muted">match esatto</div>' : ''}
-        </td>
-        <td class="num">${money(x.packPrice)}</td>
-        <td class="num">
-          ${money(x.priceKg)}
-          ${x.priceKgComputed ? '<div class="muted">calcolato dal formato</div>' : ''}
-        </td>
-        <td>${esc(x.format || "")}</td>
-        <td>${esc(x.caliber || "")}</td>
-        <td>${esc(x.origin || "")}</td>
-        <td>${x.promotion ? tag("Sì","good") : ""}</td>
-        <td>
-          ${tag(x.freshness || "Da verificare", freshKind)}
-          ${x.detectedDate || x.searchDate ? `<div class="muted">${esc(x.detectedDate || x.searchDate)}</div>` : ""}
-        </td>
-        <td>${blocked ? tag(x.verification,"warn") : esc(x.verification || "")}</td>
-        <td>${tag(x.confidence || "", confKind)}</td>
-        <td><a href="${esc(x.url)}" target="_blank" rel="noreferrer">Apri</a></td>
-      </tr>
-    `;
+    <div class="metric">Dati protetti<b>${protectedRows}</b></div>
+    <div class="metric">Tempo<b>${Math.round(run.durationMs/1000)} s</b></div>`;
+  document.getElementById("tbody").innerHTML=run.results.map(x=>{
+    const source=x.retailer||x.domain||"";
+    const freshKind=x.freshness==="Corrente"?"good":x.freshness==="Storico"?"bad":"warn";
+    const confKind=x.confidence==="Alta"?"good":x.confidence==="Bassa"?"bad":"warn";
+    const protectedData=String(x.verification||"").includes("dati Google mantenuti")||String(x.verification||"").includes("bloccato");
+    return `<tr>
+      <td><b>${esc(source)}</b>${x.retailer?`<div class="muted">${esc(x.domain)}</div>`:""}</td>
+      <td>${tag(x.sourceType||"")}</td>
+      <td>${esc(x.title||"")}${x.exactTitleMatch?'<div class="muted">match esatto</div>':""}</td>
+      <td class="num">${money(x.packPrice)}</td>
+      <td class="num">${money(x.priceKg)}${x.priceKgComputed?'<div class="muted">calcolato dal formato</div>':""}</td>
+      <td>${esc(x.format||"")}</td><td>${esc(x.caliber||"")}</td><td>${esc(x.origin||"")}</td>
+      <td>${x.promotion?tag("Sì","good"):""}</td>
+      <td>${tag(x.freshness||"Da verificare",freshKind)}${x.detectedDate||x.searchDate?`<div class="muted">${esc(x.detectedDate||x.searchDate)}</div>`:""}</td>
+      <td>${protectedData?tag(x.verification,"warn"):esc(x.verification||"")}</td>
+      <td>${tag(x.confidence||"",confKind)}</td>
+      <td><a href="${esc(x.url)}" target="_blank" rel="noreferrer">Apri</a></td></tr>`;
   }).join("");
 }
-
-document.getElementById("testBtn").onclick = async () => {
-  const status = document.getElementById("status");
-  status.className = "status";
-  status.textContent = "Test Serper...";
-
-  try {
-    const r = await fetch(
-      "/api/test-serper?q=" +
-      encodeURIComponent(document.getElementById("product").value.trim())
-    );
-    const data = await readJsonSafe(r);
-    status.textContent = data.ok
-      ? `Serper OK: ${data.organicCount} risultati Google ricevuti.`
-      : `Serper non disponibile: ${data.error || "errore"}`;
-  } catch (e) {
-    status.className = "error";
-    status.textContent = e.message;
-  }
+document.getElementById("testBtn").onclick=async()=>{
+  const status=document.getElementById("status");status.className="status";status.textContent="Test Serper...";
+  try{const r=await fetch("/api/test-serper?q="+encodeURIComponent(document.getElementById("product").value.trim()));
+    const data=await readJsonSafe(r);status.textContent=data.ok?`Serper OK: ${data.organicCount} risultati Google ricevuti.`:`Serper non disponibile: ${data.error||"errore"}`;
+  }catch(e){status.className="error";status.textContent=e.message}
 };
-
-document.getElementById("searchBtn").onclick = async () => {
-  const btn = document.getElementById("searchBtn");
-  const status = document.getElementById("status");
-
-  btn.disabled = true;
-  status.className = "status";
-  status.textContent = "Ricerca Google + GDO + verifica pagine in corso...";
-
-  try {
-    const r = await fetch("/api/search", {
-      method:"POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        product: document.getElementById("product").value.trim(),
-        aliases: lines("aliases"),
-        exclusions: lines("exclusions"),
-        retailerDomains: lines("domains"),
-        maxPages: Number(document.getElementById("maxPages").value || 25),
-        browserPages: Number(document.getElementById("browserPages").value || 3),
-        strictMatch: document.getElementById("strictMatch").checked,
-        gdoExtended: document.getElementById("gdoExtended").checked,
-        includeSecondary: document.getElementById("includeSecondary").checked
-      })
-    });
-
-    const data = await readJsonSafe(r);
-    render(data);
-
-    status.textContent =
-      `Completato: ${data.results.length} risultati da ${data.candidates} candidati; ` +
-      `${data.queries} query Google.`;
-  } catch (e) {
-    status.className = "error";
-    status.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
+document.getElementById("searchBtn").onclick=async()=>{
+  const btn=document.getElementById("searchBtn"),status=document.getElementById("status");
+  btn.disabled=true;status.className="status";status.textContent="Ricerca Google + GDO + verifica sicura in corso...";
+  try{
+    const r=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      product:document.getElementById("product").value.trim(),aliases:lines("aliases"),exclusions:lines("exclusions"),
+      retailerDomains:lines("domains"),maxPages:Number(document.getElementById("maxPages").value||25),
+      browserPages:Number(document.getElementById("browserPages").value||3),
+      strictMatch:document.getElementById("strictMatch").checked,gdoExtended:document.getElementById("gdoExtended").checked,
+      includeSecondary:document.getElementById("includeSecondary").checked
+    })});
+    const data=await readJsonSafe(r);render(data);
+    status.textContent=`Completato: ${data.results.length} risultati da ${data.candidates} candidati; ${data.queries} query Google.`;
+  }catch(e){status.className="error";status.textContent=e.message}finally{btn.disabled=false}
 };
-
-document.getElementById("exportBtn").onclick = async () => {
-  if (!lastRun) return;
-
-  const r = await fetch("/api/export-xlsx", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(lastRun)
-  });
-
-  const blob = await r.blob();
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download =
-    (lastRun.product || "Product_Radar")
-      .replace(/[^\w\-]+/g, "_") + ".xlsx";
-  a.click();
-  URL.revokeObjectURL(a.href);
+document.getElementById("exportBtn").onclick=async()=>{
+  if(!lastRun)return;
+  const r=await fetch("/api/export-xlsx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(lastRun)});
+  const blob=await r.blob(),a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=(lastRun.product||"Product_Radar").replace(/[^\w\-]+/g,"_")+".xlsx";a.click();URL.revokeObjectURL(a.href);
 };
 </script>
 </body>

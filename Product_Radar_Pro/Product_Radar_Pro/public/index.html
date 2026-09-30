@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Product Radar Pro v4</title>
+  <title>Product Radar Pro v5</title>
   <style>
     :root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#1d232a;background:#f4f6f8}
     *{box-sizing:border-box}
@@ -18,13 +18,15 @@
     label{font-weight:600;display:block;margin-bottom:6px}
     input,textarea{width:100%;padding:10px 11px;border:1px solid #cbd2d9;border-radius:8px;font:inherit}
     textarea{min-height:92px;resize:vertical}
+    .checkrow{display:flex;align-items:center;gap:8px;margin-top:8px}
+    .checkrow input{width:auto}
     button{border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:pointer}
     .primary{background:#1f6feb;color:white}
     .secondary{background:#eef2f6;color:#25313c}
     .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
     .status{color:#5a6570}
     .error{color:#a40000;font-weight:600}
-    .metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+    .metrics{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
     .metric{padding:12px;border-radius:10px;background:#f6f8fa}
     .metric b{display:block;font-size:22px;margin-top:4px}
     .tablewrap{overflow:auto;max-height:72vh;border:1px solid #e0e4e8;border-radius:10px}
@@ -47,8 +49,8 @@
 </head>
 <body>
 <header>
-  <h1>Product Radar Pro v4</h1>
-  <p>Ricerca commerciale, verifica pagina e normalizzazione di prezzo/formato/calibro.</p>
+  <h1>Product Radar Pro v5</h1>
+  <p>Match prodotto rigoroso + ricerca GDO estesa + verifica prezzi.</p>
 </header>
 
 <main>
@@ -57,14 +59,24 @@
       <div class="wide">
         <label>Prodotto</label>
         <input id="product" value="Mela Golden Melinda">
+        <div class="checkrow">
+          <input id="strictMatch" type="checkbox" checked>
+          <label for="strictMatch" style="margin:0">Mostra solo corrispondenze esatte del prodotto</label>
+        </div>
       </div>
+
       <div>
         <label>Massimo risultati finali</label>
-        <input id="maxPages" type="number" min="5" max="50" value="20">
+        <input id="maxPages" type="number" min="5" max="50" value="25">
       </div>
+
       <div>
         <label>Pagine da verificare in profondità</label>
         <input id="browserPages" type="number" min="0" max="8" value="3">
+        <div class="checkrow">
+          <input id="gdoExtended" type="checkbox" checked>
+          <label for="gdoExtended" style="margin:0">Ricerca GDO estesa</label>
+        </div>
       </div>
 
       <div class="wide">
@@ -89,8 +101,8 @@ purea</textarea>
       </div>
 
       <div class="wide">
-        <label>Retailer prioritari (opzionale)</label>
-        <textarea id="domains" placeholder="carrefour.it&#10;conad.it&#10;despar.it"></textarea>
+        <label>Retailer prioritari aggiuntivi (opzionale)</label>
+        <textarea id="domains" placeholder="es. tosano.it&#10;mercato.it"></textarea>
       </div>
     </div>
 
@@ -157,9 +169,8 @@ const money = v =>
 async function readJsonSafe(response) {
   const text = await response.text();
   let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
+  try { data = JSON.parse(text); }
+  catch {
     throw new Error(
       `Risposta server non valida (HTTP ${response.status}): ` +
       text.slice(0,160).replace(/\s+/g," ")
@@ -183,10 +194,12 @@ function render(run) {
   const withPrice = run.results.filter(x => x.packPrice !== null || x.priceKg !== null).length;
   const verified = run.results.filter(x => String(x.verification || "").startsWith("Pagina verificata")).length;
   const gdo = run.results.filter(x => x.sourceType === "GDO / Retailer").length;
+  const exact = run.results.filter(x => x.exactTitleMatch).length;
 
   document.getElementById("metrics").innerHTML = `
     <div class="metric">Risultati<b>${run.results.length}</b></div>
     <div class="metric">Candidati web<b>${run.candidates}</b></div>
+    <div class="metric">Match esatti<b>${exact}</b></div>
     <div class="metric">GDO / Retailer<b>${gdo}</b></div>
     <div class="metric">Con prezzo<b>${withPrice}</b></div>
     <div class="metric">Pagine verificate<b>${verified}</b></div>
@@ -205,7 +218,10 @@ function render(run) {
           ${x.retailer ? `<div class="muted">${esc(x.domain)}</div>` : ""}
         </td>
         <td>${tag(x.sourceType || "")}</td>
-        <td>${esc(x.title || "")}</td>
+        <td>
+          ${esc(x.title || "")}
+          ${x.exactTitleMatch ? '<div class="muted">match esatto</div>' : ''}
+        </td>
         <td class="num">${money(x.packPrice)}</td>
         <td class="num">
           ${money(x.priceKg)}
@@ -253,7 +269,7 @@ document.getElementById("searchBtn").onclick = async () => {
 
   btn.disabled = true;
   status.className = "status";
-  status.textContent = "Ricerca Google + verifica delle migliori pagine in corso...";
+  status.textContent = "Ricerca commerciale + GDO + verifica pagine in corso...";
 
   try {
     const r = await fetch("/api/search", {
@@ -264,8 +280,10 @@ document.getElementById("searchBtn").onclick = async () => {
         aliases: lines("aliases"),
         exclusions: lines("exclusions"),
         retailerDomains: lines("domains"),
-        maxPages: Number(document.getElementById("maxPages").value || 20),
-        browserPages: Number(document.getElementById("browserPages").value || 3)
+        maxPages: Number(document.getElementById("maxPages").value || 25),
+        browserPages: Number(document.getElementById("browserPages").value || 3),
+        strictMatch: document.getElementById("strictMatch").checked,
+        gdoExtended: document.getElementById("gdoExtended").checked
       })
     });
 
@@ -273,8 +291,8 @@ document.getElementById("searchBtn").onclick = async () => {
     render(data);
 
     status.textContent =
-      `Completato: ${data.results.length} risultati da ${data.candidates} candidati. ` +
-      `${data.deepRequested} pagine richieste per verifica.`;
+      `Completato: ${data.results.length} risultati da ${data.candidates} candidati; ` +
+      `${data.queries} query Google.`;
   } catch (e) {
     status.className = "error";
     status.textContent = e.message;

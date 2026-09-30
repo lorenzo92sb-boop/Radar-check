@@ -6,7 +6,7 @@ import XLSX from "xlsx";
 
 import { buildAliases, buildQueries, normalizeText } from "./lib/query.js";
 import { multiSearch, testSerper } from "./lib/searchProviders.js";
-import { analyzeResult } from "./lib/extract.js";
+import { analyzeResult, extractCommercialFields } from "./lib/extract.js";
 import { appendRun, readHistory } from "./lib/history.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +15,27 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+const RETAILER_MAP = [
+  ["bennet.com", "Bennet"],
+  ["decoacasa.multicedi.it", "Decò"],
+  ["carrefour.it", "Carrefour"],
+  ["conad.it", "Conad"],
+  ["coop.it", "Coop"],
+  ["coopacasa.", "Coop"],
+  ["despar.it", "Despar"],
+  ["esselunga.it", "Esselunga"],
+  ["famila.it", "Famila"],
+  ["iper.it", "Iper"],
+  ["penny.it", "Penny"],
+  ["lidl.it", "Lidl"],
+  ["eurospin.it", "Eurospin"],
+  ["mdspa.it", "MD"],
+  ["tigros.it", "Tigros"],
+  ["pamretailpro.it", "Pam"]
+];
 
 function canonical(url = "") {
   try {
@@ -29,59 +50,53 @@ function canonical(url = "") {
   }
 }
 
-function dedupeRoundRobin(batches, maxItems) {
-  const out = [];
-  const seen = new Set();
-  let index = 0;
-
-  while (out.length < maxItems) {
-    let added = false;
-    for (const batch of batches) {
-      const item = batch[index];
-      if (!item) continue;
-      const key = canonical(item.url);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(item);
-      added = true;
-      if (out.length >= maxItems) break;
-    }
-    if (!added) break;
-    index++;
+function hostname(url = "") {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
   }
-  return out;
 }
 
-function hostName(url = "") {
-  try { return new URL(url).hostname.replace(/^www\./, ""); }
-  catch { return ""; }
+function retailerName(domain) {
+  const row = RETAILER_MAP.find(([needle]) => domain.includes(needle));
+  return row ? row[1] : null;
 }
 
-function parseNumber(v) {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim().replace(/[^\d,.\-]/g, "");
-  if (!s) return null;
-  if (s.includes(",") && s.includes(".")) return Number(s.replace(/\./g, "").replace(",", "."));
-  if (s.includes(",")) return Number(s.replace(",", "."));
-  const x = Number(s);
-  return Number.isFinite(x) ? x : null;
-}
+function sourceType(domain, text = "") {
+  if (retailerName(domain)) return "GDO / Retailer";
+  if (/facebook\.com|instagram\.com|tiktok\.com|youtube\.com/i.test(domain)) return "Social";
+  if (/volantino|offerte|promo|anteprima|nuovovolantino/i.test(domain)) return "Volantino / Promo";
+  if (/calorie|openfoodfacts|wikipedia|nutriz|dieta|ricette?/i.test(domain)) return "Informativo";
 
-function productTokenSet(product, aliases) {
-  const generic = new Set([
-    "mela","mele","pera","pere","kiwi","uva","frutta","italia","italiano","italiane",
-    "delicious","golden"
-  ]);
-  const tokens = new Set();
-  for (const s of [product, ...aliases]) {
-    for (const tok of normalizeText(s).split(" ")) {
-      if (tok.length >= 3 && !generic.has(tok)) tokens.add(tok);
-    }
+  const t = normalizeText(text);
+  if (/\b(acquista|shop|spesa|carrello|consegna|vendita|prezzo|€|eur|kg)\b/i.test(text)) {
+    return "E-commerce";
   }
-  return tokens;
+  if (t.includes("frutta") || t.includes("ortofrutta") || t.includes("ortofrutt")) {
+    return "E-commerce";
+  }
+  return "Altro";
 }
 
-function isHardExcluded(text, exclusions) {
+function yearFromText(text = "") {
+  const years = [...String(text).matchAll(/\b(20\d{2})\b/g)]
+    .map(m => Number(m[1]))
+    .filter(y => y >= 2000 && y <= CURRENT_YEAR + 1);
+
+  if (!years.length) return null;
+  return Math.max(...years);
+}
+
+function freshness(text = "") {
+  const y = yearFromText(text);
+  if (/archiv/i.test(text)) return { label: "Storico", year: y };
+  if (y && y < CURRENT_YEAR) return { label: "Storico", year: y };
+  if (y === CURRENT_YEAR) return { label: "Corrente", year: y };
+  return { label: "Da verificare", year: y };
+}
+
+function hardExcluded(text, exclusions) {
   const hay = normalizeText(text);
   return exclusions.some(x => {
     const ex = normalizeText(x);
@@ -89,89 +104,175 @@ function isHardExcluded(text, exclusions) {
   });
 }
 
+function productCoreTokens(product, aliases) {
+  const generic = new Set([
+    "mela","mele","pera","pere","kiwi","uva","frutta","italia","italiano","italiane",
+    "delicious","golden"
+  ]);
+  const out = new Set();
+  for (const s of [product, ...aliases]) {
+    for (const tok of normalizeText(s).split(" ")) {
+      if (tok.length >= 3 && !generic.has(tok)) out.add(tok);
+    }
+  }
+  return out;
+}
+
 function quickExtract(item, product, aliases, exclusions) {
   const text = `${item.title || ""} ${item.snippet || ""}`.replace(/\s+/g, " ").trim();
-  const lower = normalizeText(text);
-  const domain = hostName(item.url);
+  const domain = hostname(item.url);
 
-  // Exclusion hard: se il titolo/snippet parla di mousse, succo, snack ecc. viene scartato.
-  if (isHardExcluded(text, exclusions)) return null;
+  if (hardExcluded(text, exclusions)) return null;
 
-  const productTokens = productTokenSet(product, aliases);
-  let matched = 0;
-  for (const tok of productTokens) {
-    if (lower.includes(tok)) matched++;
+  const normalized = normalizeText(text);
+  const coreTokens = productCoreTokens(product, aliases);
+
+  let productMatch = 0;
+  for (const tok of coreTokens) {
+    if (normalized.includes(tok)) productMatch++;
   }
 
-  // "Melinda" è il segnale più importante per questo tipo di ricerca.
-  const brandMatch = lower.includes("melinda") ? 5 : 0;
+  // Per "Mela Golden Melinda", il marchio Melinda è essenziale.
+  const brandMatch = normalized.includes("melinda");
+  if (!brandMatch && normalizeText(product).includes("melinda")) return null;
 
-  // Segnali commerciali / retail.
-  const commercialWords = [
+  const commercialSignals = [
     "prezzo","offerta","acquista","compra","shop","spesa","supermercato","€","eur",
     "kg","confezione","cassetta","vendita","disponibile","carrello","promo","volantino"
   ];
-  let commercial = 0;
-  for (const w of commercialWords) {
-    if (text.toLowerCase().includes(w.toLowerCase())) commercial++;
+  let commercialScore = 0;
+  for (const s of commercialSignals) {
+    if (text.toLowerCase().includes(s.toLowerCase())) commercialScore++;
   }
 
-  // Penalizza fortemente pagine informative/nutrizionali non commerciali.
-  const infoWords = [
+  const infoSignals = [
     "calorie","dieta","chetogenica","nutrizione","valori nutrizionali","ricetta",
-    "openfoodfacts","wikipedia","benefici","proprietà","quante calorie"
+    "openfoodfacts","wikipedia","benefici","proprietà"
   ];
-  let infoPenalty = 0;
-  for (const w of infoWords) {
-    if (lower.includes(normalizeText(w))) infoPenalty += 5;
+  let penalty = 0;
+  for (const s of infoSignals) {
+    if (normalized.includes(normalizeText(s))) penalty += 8;
   }
 
-  // Alcuni domini tipicamente informativi.
-  if (/calorie|openfoodfacts|wikipedia|cheto|nutriz/i.test(domain)) infoPenalty += 8;
+  const type = sourceType(domain, text);
+  if (type === "Informativo") penalty += 12;
+  if (type === "Social") penalty += 3;
 
-  let score = (matched * 3) + brandMatch + (commercial * 2) - infoPenalty;
+  const f = extractCommercialFields(text);
+  const fresh = freshness(text);
 
-  const kgMatch = text.match(/(?:€\s*)?(\d{1,3}(?:[.,]\d{2}))\s*(?:€)?\s*(?:\/|al|per)\s*kg\b/i);
-  const priceMatch =
-    text.match(/(?:€\s*)?(\d{1,3}(?:[.,]\d{2}))\s*€/i) ||
-    text.match(/€\s*(\d{1,3}(?:[.,]\d{2}))/i);
-  const formatMatch = text.match(/\b(\d+(?:[.,]\d+)?)\s*(kg|g|gr|grammi|pz|pezzi|confezioni?)\b/i);
+  let score = (productMatch * 4) + (brandMatch ? 8 : 0) + (commercialScore * 2) - penalty;
+  if (f.packPrice !== null || f.priceKg !== null) score += 6;
+  if (type === "GDO / Retailer") score += 6;
+  if (type === "E-commerce") score += 3;
+  if (fresh.label === "Storico") score -= 5;
 
-  if (priceMatch || kgMatch) score += 5;
+  let confidence = "Bassa";
+  if (score >= 24 && (f.packPrice !== null || f.priceKg !== null)) confidence = "Alta";
+  else if (score >= 14) confidence = "Media";
+
+  const retailer = retailerName(domain);
 
   return {
-    queryTitle: item.title || "",
     title: item.title || "",
     url: item.url || "",
     domain,
+    retailer,
+    sourceType: type,
     provider: item.provider || "",
     snippet: item.snippet || "",
-    price: priceMatch ? parseNumber(priceMatch[1]) : null,
-    priceKg: kgMatch ? parseNumber(kgMatch[1]) : null,
-    currency: (priceMatch || kgMatch) ? "EUR" : null,
-    format: formatMatch ? `${formatMatch[1]} ${formatMatch[2]}` : null,
-    promotion: /\b(offerta|promo|promozione|sconto|volantino|sottocosto)\b/i.test(text),
-    availability: null,
-    brand: lower.includes("melinda") ? "Melinda" : null,
-    sku: null,
-    detectedDate: null,
+    packPrice: f.packPrice,
+    price: f.packPrice,
+    priceKg: f.priceKg,
+    priceKgComputed: f.priceKgComputed,
+    format: f.format,
+    weightKg: f.weightKg,
+    caliber: f.caliber,
+    promotion: f.promotion,
+    detectedDate: f.detectedDate,
+    origin: f.origin,
+    freshness: fresh.label,
+    year: fresh.year,
+    verification: "Snippet Google",
+    confidence,
     relevanceScore: score,
-    commercialScore: commercial,
-    evidence: item.snippet || "",
-    usedBrowser: false,
-    quickResult: true
+    commercialScore,
+    evidence: item.snippet || ""
   };
 }
 
-function resultKey(x) {
-  return `${x.domain}|${String(x.title || "").toLowerCase().replace(/\s+/g, " ").slice(0, 120)}|${x.price ?? ""}|${x.priceKg ?? ""}`;
+function semanticKey(x) {
+  let title = normalizeText(x.title || "")
+    .replace(/\b(archivi|archivio|shop|online|spesa|domicilio)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return [
+    x.domain,
+    title.slice(0, 90),
+    x.packPrice ?? "",
+    x.priceKg ?? ""
+  ].join("|");
+}
+
+function dedupeRoundRobin(batches, maxItems) {
+  const out = [];
+  const seen = new Set();
+  let index = 0;
+
+  while (out.length < maxItems) {
+    let added = false;
+
+    for (const batch of batches) {
+      const item = batch[index];
+      if (!item) continue;
+
+      const key = canonical(item.url);
+      if (!key || seen.has(key)) continue;
+
+      seen.add(key);
+      out.push(item);
+      added = true;
+
+      if (out.length >= maxItems) break;
+    }
+
+    if (!added) break;
+    index++;
+  }
+
+  return out;
+}
+
+function sortResults(a, b) {
+  const aCurrent = a.freshness === "Corrente" ? 2 : a.freshness === "Da verificare" ? 1 : 0;
+  const bCurrent = b.freshness === "Corrente" ? 2 : b.freshness === "Da verificare" ? 1 : 0;
+  if (bCurrent !== aCurrent) return bCurrent - aCurrent;
+
+  const typeRank = {
+    "GDO / Retailer": 5,
+    "E-commerce": 4,
+    "Volantino / Promo": 3,
+    "Altro": 2,
+    "Social": 1,
+    "Informativo": 0
+  };
+
+  if ((typeRank[b.sourceType] ?? 0) !== (typeRank[a.sourceType] ?? 0)) {
+    return (typeRank[b.sourceType] ?? 0) - (typeRank[a.sourceType] ?? 0);
+  }
+
+  const aPrice = (a.packPrice !== null || a.priceKg !== null) ? 1 : 0;
+  const bPrice = (b.packPrice !== null || b.priceKg !== null) ? 1 : 0;
+  if (bPrice !== aPrice) return bPrice - aPrice;
+
+  return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
 }
 
 app.get("/api/test-serper", async (req, res) => {
   try {
     const q = String(req.query.q || "Mela Golden Melinda");
-    const out = await testSerper(q);
-    res.json(out);
+    res.json(await testSerper(q));
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
@@ -186,73 +287,100 @@ app.post("/api/search", async (req, res) => {
 
     const aliases = Array.isArray(req.body.aliases) ? req.body.aliases.filter(Boolean) : [];
     const exclusions = Array.isArray(req.body.exclusions) ? req.body.exclusions.filter(Boolean) : [];
-    const retailerDomains = Array.isArray(req.body.retailerDomains) ? req.body.retailerDomains.filter(Boolean) : [];
+    const retailerDomains = Array.isArray(req.body.retailerDomains)
+      ? req.body.retailerDomains.filter(Boolean)
+      : [];
 
-    const maxPages = Math.min(Math.max(Number(req.body.maxPages || 20), 5), 50);
-    const browserPages = Math.min(Math.max(Number(req.body.browserPages || 0), 0), 10);
+    const maxResults = Math.min(Math.max(Number(req.body.maxPages || 20), 5), 50);
+    const deepPages = Math.min(Math.max(Number(req.body.browserPages || 3), 0), 8);
 
     const expandedAliases = buildAliases(product, aliases);
-    const queries = buildQueries(product, aliases, retailerDomains, maxPages);
+    const queries = buildQueries(product, aliases, retailerDomains, maxResults);
 
+    // 2 chiamate Google in parallelo massimo: stabile su Render Free.
     const searchLimit = pLimit(2);
-    const rawBatches = await Promise.all(
+    const batches = await Promise.all(
       queries.map(q => searchLimit(() => multiSearch(q, 10)))
     );
 
-    // Importante: miscela i risultati di tutte le query.
-    // Prima i primi 10 arrivavano quasi tutti dalla prima query Google.
-    const raw = dedupeRoundRobin(rawBatches, Math.max(maxPages * 3, 20));
+    // Prendiamo molti più candidati dei risultati finali.
+    const raw = dedupeRoundRobin(
+      batches,
+      Math.max(maxResults * 4, 40)
+    );
 
     let results = raw
       .map(item => quickExtract(item, product, expandedAliases, exclusions))
       .filter(Boolean)
-      .filter(x => (x.relevanceScore ?? 0) >= 6)
-      .sort((a, b) => {
-        const ap = (a.price !== null || a.priceKg !== null) ? 1 : 0;
-        const bp = (b.price !== null || b.priceKg !== null) ? 1 : 0;
-        if (bp !== ap) return bp - ap;
-        if ((b.commercialScore ?? 0) !== (a.commercialScore ?? 0)) {
-          return (b.commercialScore ?? 0) - (a.commercialScore ?? 0);
-        }
-        return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
-      })
-      .slice(0, maxPages);
+      .filter(x => x.relevanceScore >= 10)
+      .sort(sortResults);
 
-    // Analisi profonda SOLO delle pagine già classificate come buone.
-    if (browserPages > 0 && results.length > 0) {
-      const candidates = results.slice(0, Math.min(browserPages, results.length));
-      const analyzeLimit = pLimit(2);
-      const deep = await Promise.all(
+    // Dedupe semantico
+    const byKey = new Map();
+    for (const x of results) {
+      const key = semanticKey(x);
+      const old = byKey.get(key);
+      if (!old || (x.relevanceScore ?? 0) > (old.relevanceScore ?? 0)) {
+        byKey.set(key, x);
+      }
+    }
+    results = [...byKey.values()].sort(sortResults);
+
+    // Analisi profonda: solo i migliori candidati, uno per volta.
+    if (deepPages > 0 && results.length > 0) {
+      const candidates = results
+        .filter(x => x.sourceType !== "Social" && x.freshness !== "Storico")
+        .slice(0, deepPages);
+
+      const deepLimit = pLimit(1);
+      const deepSettled = await Promise.allSettled(
         candidates.map(item =>
-          analyzeLimit(() => analyzeResult(
-            { title: item.title, url: item.url, snippet: item.snippet, provider: item.provider },
-            expandedAliases,
-            exclusions,
-            true
-          ))
+          deepLimit(() =>
+            analyzeResult(
+              {
+                title: item.title,
+                url: item.url,
+                snippet: item.snippet,
+                provider: item.provider
+              },
+              expandedAliases,
+              exclusions,
+              true
+            )
+          )
         )
       );
 
-      const deepByUrl = new Map(deep.map(x => [canonical(x.url), x]));
+      const deepByUrl = new Map();
+      for (const s of deepSettled) {
+        if (s.status !== "fulfilled" || !s.value) continue;
+        deepByUrl.set(canonical(s.value.url), s.value);
+      }
+
       results = results.map(x => {
         const d = deepByUrl.get(canonical(x.url));
         if (!d) return x;
+
+        const fresh = freshness(`${d.detectedDate || ""} ${d.title || ""}`);
+
         return {
           ...x,
           ...d,
-          relevanceScore: Math.max(x.relevanceScore || 0, d.relevanceScore || 0)
+          retailer: x.retailer,
+          sourceType: x.sourceType,
+          freshness: d.historical ? "Storico" : fresh.label,
+          year: fresh.year,
+          relevanceScore: Math.max(x.relevanceScore || 0, d.relevanceScore || 0),
+          confidence: d.confidence || x.confidence
         };
       });
     }
 
-    const byKey = new Map();
-    for (const x of results) {
-      const k = resultKey(x);
-      const old = byKey.get(k);
-      if (!old || (x.relevanceScore ?? 0) > (old.relevanceScore ?? 0)) byKey.set(k, x);
-    }
-
-    results = [...byKey.values()];
+    // Riclassifica e limita il risultato finale.
+    results = results
+      .filter(x => x.sourceType !== "Informativo")
+      .sort(sortResults)
+      .slice(0, maxResults);
 
     const run = {
       id: `run_${Date.now()}`,
@@ -262,6 +390,7 @@ app.post("/api/search", async (req, res) => {
       durationMs: Date.now() - started,
       queries: queries.length,
       candidates: raw.length,
+      deepRequested: deepPages,
       serperEnabled: Boolean(process.env.SERPER_API_KEY),
       results
     };
@@ -285,32 +414,52 @@ app.get("/api/history", (req, res) => {
 
 app.post("/api/export-xlsx", (req, res) => {
   const run = req.body || {};
+
   const rows = (run.results || []).map(x => ({
     "Data rilevazione": run.createdAt || "",
     "Prodotto cercato": run.product || "",
+    "Insegna": x.retailer || "",
     "Fonte": x.domain || "",
-    "Titolo": x.title || "",
-    "Prezzo €": x.price ?? "",
+    "Tipo fonte": x.sourceType || "",
+    "Prodotto trovato": x.title || "",
+    "Prezzo confezione €": x.packPrice ?? "",
     "Prezzo €/kg": x.priceKg ?? "",
+    "€/kg calcolato": x.priceKgComputed ? "Sì" : "No",
     "Formato": x.format || "",
+    "Calibro": x.caliber || "",
+    "Origine": x.origin || "",
     "Promozione": x.promotion ? "Sì" : "No",
-    "Disponibilità": x.availability || "",
-    "Marca": x.brand || "",
-    "SKU/GTIN": x.sku || "",
-    "Confidenza": x.relevanceScore ?? "",
+    "Data/prezzo": x.detectedDate || "",
+    "Freschezza": x.freshness || "",
+    "Verifica": x.verification || "",
+    "Confidenza": x.confidence || "",
     "Motore": x.provider || "",
     "URL": x.url || "",
     "Estratto": x.evidence || ""
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = [
+    {wch:20},{wch:18},{wch:25},{wch:18},{wch:50},{wch:18},{wch:14},{wch:15},
+    {wch:14},{wch:14},{wch:18},{wch:12},{wch:18},{wch:14},{wch:22},{wch:14},
+    {wch:18},{wch:70},{wch:90}
+  ];
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Risultati");
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
-  const safe = String(run.product || "Product_Radar").replace(/[^\p{L}\p{N}\-_]+/gu, "_");
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="${safe}.xlsx"`);
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const safe = String(run.product || "Product_Radar")
+    .replace(/[^\p{L}\p{N}\-_]+/gu, "_");
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${safe}.xlsx"`
+  );
   res.send(buf);
 });
 
@@ -318,11 +467,11 @@ app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     serper: Boolean(process.env.SERPER_API_KEY),
-    version: "3.0"
+    version: "4.0"
   });
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Product Radar Pro v3 attivo sulla porta ${port}`);
+  console.log(`Product Radar Pro v4 attivo sulla porta ${port}`);
 });

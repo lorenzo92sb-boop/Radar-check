@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: product-radar-pro
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BRAVE_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true

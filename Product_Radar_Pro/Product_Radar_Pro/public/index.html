@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Product Radar Pro v5</title>
+  <title>Product Radar Pro v6</title>
   <style>
     :root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#1d232a;background:#f4f6f8}
     *{box-sizing:border-box}
@@ -49,8 +49,8 @@
 </head>
 <body>
 <header>
-  <h1>Product Radar Pro v5</h1>
-  <p>Match prodotto rigoroso + ricerca GDO estesa + verifica prezzi.</p>
+  <h1>Product Radar Pro v6</h1>
+  <p>Ricerca GDO più ampia, fonti secondarie filtrabili e gestione anti-bot.</p>
 </header>
 
 <main>
@@ -61,7 +61,7 @@
         <input id="product" value="Mela Golden Melinda">
         <div class="checkrow">
           <input id="strictMatch" type="checkbox" checked>
-          <label for="strictMatch" style="margin:0">Mostra solo corrispondenze esatte del prodotto</label>
+          <label for="strictMatch" style="margin:0">Solo corrispondenze esatte del prodotto</label>
         </div>
       </div>
 
@@ -103,6 +103,10 @@ purea</textarea>
       <div class="wide">
         <label>Retailer prioritari aggiuntivi (opzionale)</label>
         <textarea id="domains" placeholder="es. tosano.it&#10;mercato.it"></textarea>
+        <div class="checkrow">
+          <input id="includeSecondary" type="checkbox">
+          <label for="includeSecondary" style="margin:0">Includi social, pagine brand e fonti informative</label>
+        </div>
       </div>
     </div>
 
@@ -193,16 +197,16 @@ function render(run) {
 
   const withPrice = run.results.filter(x => x.packPrice !== null || x.priceKg !== null).length;
   const verified = run.results.filter(x => String(x.verification || "").startsWith("Pagina verificata")).length;
+  const blocked = run.results.filter(x => String(x.verification || "").includes("bloccato")).length;
   const gdo = run.results.filter(x => x.sourceType === "GDO / Retailer").length;
-  const exact = run.results.filter(x => x.exactTitleMatch).length;
 
   document.getElementById("metrics").innerHTML = `
     <div class="metric">Risultati<b>${run.results.length}</b></div>
     <div class="metric">Candidati web<b>${run.candidates}</b></div>
-    <div class="metric">Match esatti<b>${exact}</b></div>
     <div class="metric">GDO / Retailer<b>${gdo}</b></div>
     <div class="metric">Con prezzo<b>${withPrice}</b></div>
     <div class="metric">Pagine verificate<b>${verified}</b></div>
+    <div class="metric">Anti-bot<b>${blocked}</b></div>
     <div class="metric">Tempo<b>${Math.round(run.durationMs/1000)} s</b></div>
   `;
 
@@ -210,6 +214,7 @@ function render(run) {
     const source = x.retailer || x.domain || "";
     const freshKind = x.freshness === "Corrente" ? "good" : x.freshness === "Storico" ? "bad" : "warn";
     const confKind = x.confidence === "Alta" ? "good" : x.confidence === "Bassa" ? "bad" : "warn";
+    const blocked = String(x.verification || "").includes("bloccato");
 
     return `
       <tr>
@@ -233,9 +238,9 @@ function render(run) {
         <td>${x.promotion ? tag("Sì","good") : ""}</td>
         <td>
           ${tag(x.freshness || "Da verificare", freshKind)}
-          ${x.detectedDate ? `<div class="muted">${esc(x.detectedDate)}</div>` : ""}
+          ${x.detectedDate || x.searchDate ? `<div class="muted">${esc(x.detectedDate || x.searchDate)}</div>` : ""}
         </td>
-        <td>${esc(x.verification || "")}</td>
+        <td>${blocked ? tag(x.verification,"warn") : esc(x.verification || "")}</td>
         <td>${tag(x.confidence || "", confKind)}</td>
         <td><a href="${esc(x.url)}" target="_blank" rel="noreferrer">Apri</a></td>
       </tr>
@@ -269,7 +274,7 @@ document.getElementById("searchBtn").onclick = async () => {
 
   btn.disabled = true;
   status.className = "status";
-  status.textContent = "Ricerca commerciale + GDO + verifica pagine in corso...";
+  status.textContent = "Ricerca Google + GDO + verifica pagine in corso...";
 
   try {
     const r = await fetch("/api/search", {
@@ -283,7 +288,8 @@ document.getElementById("searchBtn").onclick = async () => {
         maxPages: Number(document.getElementById("maxPages").value || 25),
         browserPages: Number(document.getElementById("browserPages").value || 3),
         strictMatch: document.getElementById("strictMatch").checked,
-        gdoExtended: document.getElementById("gdoExtended").checked
+        gdoExtended: document.getElementById("gdoExtended").checked,
+        includeSecondary: document.getElementById("includeSecondary").checked
       })
     });
 
